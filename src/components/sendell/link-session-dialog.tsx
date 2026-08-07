@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   Cable,
   Copy,
-  Check,
   Link2,
   Share2,
   Smartphone,
@@ -21,8 +20,7 @@ import type { ProviderId, ProviderInfo, SessionSnapshot } from "@/lib/hub/types"
 import { tryCopyText, tryShareText } from "@/lib/utils/copy";
 import { cn } from "@/lib/utils/cn";
 
-/** User can verify they are not on a cached old bundle */
-export const PAIRING_UI_VERSION = "pairing-ui-v5";
+export const PAIRING_UI_VERSION = "pairing-ui-v6";
 
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
 type PayloadKind = "rc" | "installAgent" | "installShell";
@@ -43,76 +41,59 @@ function buildShortRc(room: SessionSnapshot | null) {
 }
 
 function buildInstallAgentPrompt(hub: string) {
-  return `[Sendell ${PAIRING_UI_VERSION}] Install remote-control skill ONCE (you run tools).
-
-Hub URL (this phone): ${hub}
-
-Steps:
-1) Find on THIS machine the folder that contains BOTH:
-   - scripts/install-remote-sendell.mjs
-   - scripts/sendell-remote.mjs
-   (Search the disk if needed. Do not use invented paths.)
-2) Run from that folder:
-   node ./scripts/install-remote-sendell.mjs --hub ${hub} --project <CURRENT_PROJECT_DIR>
-   Windows PowerShell: --project (Get-Location)
-   macOS/Linux: --project "$PWD"
-   <CURRENT_PROJECT_DIR> = the repo where the user is working now (not necessarily Sendell).
-3) Confirm config file exists:
-   Windows: %USERPROFILE%\\.sendell\\config.json
-   macOS/Linux: ~/.sendell/config.json
-   Print only: hub and scriptPath.
-4) Reply exactly: sendell install ok — next use: rc CODE
-
-Rules:
-- This install does NOT link a session.
-- Do NOT invent a pairing code.
-- Pairing codes only come from the phone "rc XXXXXX" after Link console.`;
+  return `[Sendell ${PAIRING_UI_VERSION}] Install remote-control skill ONCE (you run tools).\n\nHub URL (this phone/browser): ${hub}\n\nSteps:\n1) Find on THIS machine the folder that contains BOTH:\n   - scripts/install-remote-sendell.mjs\n   - scripts/sendell-remote.mjs\n2) Run from that folder:\n   node ./scripts/install-remote-sendell.mjs --hub ${hub} --project <CURRENT_PROJECT_DIR>\n   Windows: --project (Get-Location)\n   macOS/Linux: --project "$PWD"\n3) Confirm config:\n   Windows: %USERPROFILE%\\.sendell\\config.json\n   Print only: hub and scriptPath.\n4) Reply: sendell install ok — next use: rc CODE\n\nRules: install does NOT link. Do NOT invent codes. Pair only with phone "rc XXXXXX".`;
 }
 
-function buildInstallShell(hub: string) {
-  return `# [${PAIRING_UI_VERSION}] One-time shell install — generic paths
-# cd into YOUR clone of Sendell (wherever it lives on this PC)
-cd path/to/your/sendell-remote-control
-node ./scripts/install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
-# Then in Grok: rc THE_CODE_FROM_THE_PHONE_UI (fresh each room)
-`;
-}
-
-function SelectableText({
+function AlwaysSelectBox({
   text,
-  label,
+  title,
+  monoLarge,
 }: {
   text: string;
-  label: string;
+  title: string;
+  monoLarge?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    el.select();
-    try {
-      el.setSelectionRange(0, text.length);
-    } catch {
-      /* ignore */
-    }
-  }, [text]);
-
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-medium text-warning">
-        {label} — long-press → Copy (clipboard API blocked on HTTP)
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium text-fg-muted">{title}</p>
+        <button
+          type="button"
+          className="text-[10px] font-medium text-primary"
+          onClick={() => {
+            const el = ref.current;
+            if (!el) return;
+            el.focus();
+            el.select();
+            try {
+              el.setSelectionRange(0, text.length);
+            } catch {
+              /* ignore */
+            }
+          }}
+        >
+          Select all
+        </button>
+      </div>
       <textarea
         ref={ref}
         readOnly
         value={text}
-        rows={Math.min(12, Math.max(4, text.split("\n").length + 1))}
-        className="w-full resize-y rounded-lg border border-warning/40 bg-bg p-2.5 font-mono text-[11px] leading-relaxed text-fg"
+        rows={monoLarge ? 2 : Math.min(10, Math.max(3, text.split("\n").length))}
+        className={cn(
+          "w-full resize-y rounded-lg border border-border bg-bg p-2.5 text-fg",
+          "font-mono leading-relaxed",
+          monoLarge
+            ? "text-center text-lg font-semibold tracking-wide text-primary"
+            : "text-[11px]",
+        )}
         onFocus={(e) => e.target.select()}
         onClick={(e) => (e.target as HTMLTextAreaElement).select()}
       />
+      <p className="text-[10px] text-fg-subtle">
+        On phone: tap the box → long-press → Copy. (HTTP blocks auto-clipboard.)
+      </p>
     </div>
   );
 }
@@ -145,10 +126,7 @@ export function LinkSessionDialog({
   const [room, setRoom] = useState<SessionSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  /** When auto-copy fails, show this text for manual long-press */
-  const [manual, setManual] = useState<{ kind: PayloadKind; text: string } | null>(
-    null,
-  );
+  const [showInstall, setShowInstall] = useState(false);
 
   const reset = () => {
     setMode("choose");
@@ -156,7 +134,7 @@ export function LinkSessionDialog({
     setCode("");
     setError(null);
     setStatus(null);
-    setManual(null);
+    setShowInstall(false);
   };
 
   const handleOpenChange = (v: boolean) => {
@@ -198,56 +176,33 @@ export function LinkSessionDialog({
     const hub = hubUrl();
     if (kind === "rc") return buildShortRc(room);
     if (kind === "installAgent") return buildInstallAgentPrompt(hub);
-    return buildInstallShell(hub);
+    return "";
   };
 
-  /** Copy; if it fails, open manual select. Never fake success. */
-  const handleCopy = async (kind: PayloadKind) => {
-    const text = payloadFor(kind);
-    if (!text) return;
-    setManual(null);
-    setStatus(null);
-
-    const result = await tryCopyText(text);
-    if (result.ok) {
-      setStatus(
-        kind === "rc"
-          ? `Copied rc (${result.method})`
-          : `Copied ${kind} (${result.method})`,
-      );
-      // Verify best-effort: still show manual if insecure context (many phones lie)
-      if (!window.isSecureContext) {
-        setManual({ kind, text });
-        setStatus(
-          "May not stick on HTTP — text selected below, long-press Copy",
-        );
-      }
-      return;
-    }
-
-    setManual({ kind, text });
-    setStatus("Auto-copy failed — long-press the selected text below");
-  };
-
-  /** Share sheet (WhatsApp / Grok / etc.) — best path on phone */
   const handleShare = async (kind: PayloadKind) => {
     const text = payloadFor(kind);
     if (!text) return;
-    setManual(null);
     const shared = await tryShareText(
       text,
       kind === "rc" ? "Sendell rc" : "Sendell install",
     );
-    if (shared) {
-      setStatus("Shared — pick Grok / WhatsApp / Notes");
-      return;
+    setStatus(shared ? "Opened share sheet" : "Share unavailable — use the text box");
+  };
+
+  const handleCopy = async (kind: PayloadKind) => {
+    const text = payloadFor(kind);
+    if (!text) return;
+    const result = await tryCopyText(text);
+    if (result.ok && typeof window !== "undefined" && window.isSecureContext) {
+      setStatus("Copied to clipboard");
+    } else {
+      setStatus("Use the text box → Select all → long-press Copy");
     }
-    // Fall back to manual
-    await handleCopy(kind);
   };
 
   const hub = hubUrl();
   const rcLine = buildShortRc(room);
+  const installAgent = buildInstallAgentPrompt(hub);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -258,7 +213,7 @@ export function LinkSessionDialog({
             Link a console
           </DialogTitle>
           <DialogDescription>
-            No linked session until the terminal pairs.{" "}
+            No session until terminal pairs.{" "}
             <span className="font-mono text-[10px] text-fg-subtle">
               {PAIRING_UI_VERSION}
             </span>
@@ -274,9 +229,9 @@ export function LinkSessionDialog({
             >
               <Smartphone className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
-                <p className="text-sm font-medium text-fg">Phone shows code</p>
+                <p className="text-sm font-medium text-fg">Show pairing code</p>
                 <p className="text-xs text-fg-muted">
-                  Then <code className="text-primary">rc CODIGO</code> in Grok
+                  Then type <code className="text-primary">rc CODIGO</code> in Grok
                 </p>
               </div>
             </button>
@@ -288,7 +243,6 @@ export function LinkSessionDialog({
               <Terminal className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
                 <p className="text-sm font-medium text-fg">Enter code from terminal</p>
-                <p className="text-xs text-fg-muted">Agent printed a code first</p>
               </div>
             </button>
             <button
@@ -299,7 +253,6 @@ export function LinkSessionDialog({
               <Cable className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
                 <p className="text-sm font-medium text-fg">Try demo</p>
-                <p className="text-xs text-fg-muted">Simulated linked console</p>
               </div>
             </button>
           </div>
@@ -333,7 +286,7 @@ export function LinkSessionDialog({
                 Back
               </Button>
               <Button className="flex-1" disabled={creating} onClick={() => void createRoom()}>
-                {creating ? "…" : "Show pairing code"}
+                {creating ? "…" : "Show code"}
               </Button>
             </div>
           </div>
@@ -362,81 +315,57 @@ export function LinkSessionDialog({
 
         {mode === "room_ready" && room && liveCode(room) && (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-primary/25 bg-primary/5 px-4 py-5 text-center">
-              <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-                In Grok after install
+            <div className="rounded-2xl border border-primary/25 bg-primary/5 px-3 py-4 space-y-3">
+              <p className="text-center text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
+                Type this in Grok (this room only)
               </p>
-              <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary select-all">
-                {rcLine}
+              <AlwaysSelectBox text={rcLine} title="rc + code" monoLarge />
+              <p className="text-center text-[10px] text-fg-subtle break-all">
+                hub {hub} · not linked until terminal pairs
               </p>
-              <p className="mt-1 text-[11px] text-fg-subtle break-all">hub {hub}</p>
-              <p className="mt-1 text-[10px] text-fg-subtle">
-                Not linked until the terminal pairs
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <Button size="sm" onClick={() => void handleShare("rc")}>
                   <Share2 className="size-3.5" />
-                  Share rc
+                  Share
                 </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void handleCopy("rc")}
-                >
+                <Button size="sm" variant="secondary" onClick={() => void handleCopy("rc")}>
                   <Copy className="size-3.5" />
-                  Copy rc
+                  Try copy
                 </Button>
               </div>
             </div>
 
-            <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
-              <p className="font-medium text-fg">First time? Install skill once</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Button size="sm" onClick={() => void handleShare("installAgent")}>
-                  <Share2 className="size-3.5" />
-                  Share install
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void handleCopy("installAgent")}
-                >
-                  <Copy className="size-3.5" />
-                  Copy install
-                </Button>
-              </div>
-              <p className="text-[10px] text-fg-subtle">
-                Install text must include{" "}
-                <code className="text-primary">{PAIRING_UI_VERSION}</code>
-              </p>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="w-full"
-                onClick={() => void handleCopy("installShell")}
+            <div className="rounded-xl border border-border bg-bg-subtle p-3 space-y-2">
+              <button
+                type="button"
+                className="w-full text-left text-xs font-medium text-fg"
+                onClick={() => setShowInstall((v) => !v)}
               >
-                Shell install (manual)
-              </Button>
+                {showInstall ? "▾" : "▸"} First time? Install skill (once)
+              </button>
+              {showInstall && (
+                <div className="space-y-2">
+                  <AlwaysSelectBox text={installAgent} title="Paste into Grok once" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" onClick={() => void handleShare("installAgent")}>
+                      <Share2 className="size-3.5" />
+                      Share
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void handleCopy("installAgent")}
+                    >
+                      <Copy className="size-3.5" />
+                      Try copy
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {status && (
-              <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-primary">
-                <Check className="size-3.5" />
-                {status}
-              </p>
-            )}
-
-            {manual && (
-              <SelectableText
-                text={manual.text}
-                label={
-                  manual.kind === "rc"
-                    ? "rc command"
-                    : manual.kind === "installAgent"
-                      ? "Grok install prompt"
-                      : "Shell install"
-                }
-              />
+              <p className="text-center text-[11px] text-primary">{status}</p>
             )}
 
             <Button
@@ -444,7 +373,7 @@ export function LinkSessionDialog({
               variant="secondary"
               onClick={() => handleOpenChange(false)}
             >
-              Close (cancel room if not linked)
+              Close (cancel if not linked)
             </Button>
           </div>
         )}
