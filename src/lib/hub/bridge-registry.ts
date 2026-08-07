@@ -34,6 +34,7 @@ function tokenIndex() {
 }
 
 export function registerBridge(sessionId: string, sessionToken: string): BridgeConnection {
+  // Re-register same session (resume) keeps token index clean
   const existing = bridges().get(sessionId);
   if (existing) {
     tokenIndex().delete(existing.sessionToken);

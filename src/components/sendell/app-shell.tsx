@@ -52,8 +52,15 @@ export function AppShell() {
   const [creating, setCreating] = useState(false);
   const [pendingRoomId, setPendingRoomId] = useState<string | null>(null);
 
-  const linkedSessions = useMemo(
-    () => sessions.filter((s) => s.linkState === "linked"),
+  /** Show linked + offline consoles (not unpaired waiting rooms) */
+  const visibleSessions = useMemo(
+    () =>
+      sessions.filter(
+        (s) =>
+          s.linkState === "linked" ||
+          s.linkState === "disconnected" ||
+          s.status === "disconnected",
+      ),
     [sessions],
   );
 
@@ -89,10 +96,12 @@ export function AppShell() {
         if (cancelled) return;
         setProviders(prov);
         setSessions(list);
-        const linked = list.filter((s) => s.linkState === "linked");
-        const first = linked[0]?.id ?? null;
-        setActiveSessionId(first);
-        if (first) await refreshSnapshot(first);
+        const pick =
+          list.find((s) => s.linkState === "linked")?.id ??
+          list[0]?.id ??
+          null;
+        setActiveSessionId(pick);
+        if (pick) await refreshSnapshot(pick);
         setBootstrapped(true);
       } catch (err) {
         console.error(err);
@@ -115,8 +124,16 @@ export function AppShell() {
     if (!bootstrapped) return;
     const id = window.setInterval(async () => {
       try {
-        await refreshSessions();
-        if (activeSessionId) await refreshSnapshot(activeSessionId);
+        const list = await refreshSessions();
+        if (activeSessionId) {
+          const still = list.some((s) => s.id === activeSessionId);
+          if (!still) {
+            setActiveSessionId(list[0]?.id ?? null);
+            if (list[0]) await refreshSnapshot(list[0].id);
+          } else {
+            await refreshSnapshot(activeSessionId);
+          }
+        }
         if (pendingRoomId) {
           const snap = (await getSessionFn({
             data: { sessionId: pendingRoomId },
@@ -250,6 +267,7 @@ export function AppShell() {
     } catch (err) {
       setSending(false);
       toast.error(err instanceof Error ? err.message : "Send failed");
+      await refreshSnapshot(activeSessionId);
     }
   };
 
@@ -289,7 +307,7 @@ export function AppShell() {
     <div className="flex h-dvh overflow-hidden bg-bg">
       <div className="hidden w-72 shrink-0 border-r border-border lg:block">
         <SessionSidebar
-          sessions={linkedSessions}
+          sessions={visibleSessions}
           providers={providers}
           activeId={activeSessionId}
           onSelect={(id) => void selectSession(id)}
@@ -304,7 +322,7 @@ export function AppShell() {
             <SheetTitle>Sessions</SheetTitle>
           </SheetHeader>
           <SessionSidebar
-            sessions={linkedSessions}
+            sessions={visibleSessions}
             providers={providers}
             activeId={activeSessionId}
             onSelect={(id) => void selectSession(id)}
