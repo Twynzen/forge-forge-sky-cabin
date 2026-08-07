@@ -1,13 +1,14 @@
 /**
  * Sendell Hub — links open agent consoles (subscription/OAuth) to phone operators.
  *
- * Primary: pairing codes + bridge (no API key in the phone app).
- * Secondary: API-key adapters kept under adapters/ for later automation.
+ * Primary: pairing codes + bridge/agent loop (no API key in the phone app).
+ * Chat stays clean: no verbose system spam — status lives in the header (/rc).
  */
 
 import { EventEmitter } from "node:events";
 import {
   enqueueCommand,
+  getBridgeBySession,
   getBridgeByToken,
   makeCommandId,
   registerBridge,
@@ -167,7 +168,7 @@ class Hub {
 
     const meta: SessionMeta = {
       id,
-      title: input.title || (demo ? "Demo console · Grok" : "Waiting for console…"),
+      title: input.title || (demo ? "Demo" : "New remote"),
       providerId,
       status: demo ? "ready" : "waiting_link",
       createdAt: now,
@@ -176,9 +177,9 @@ class Hub {
       pairingCode: formatPairingCode(code),
       linkState: demo ? "linked" : "waiting",
       linkSource: demo ? "demo" : "phone_room",
-      hostLabel: demo ? "demo-console · /workspace" : undefined,
-      cwd: demo ? "/workspace" : undefined,
-      model: demo ? "grok-build (linked demo)" : undefined,
+      hostLabel: demo ? "demo" : undefined,
+      cwd: demo ? undefined : undefined,
+      model: demo ? "demo" : undefined,
     };
 
     const internal: InternalSession = {
@@ -192,21 +193,11 @@ class Hub {
     this.codeIndex.set(normalized, id);
     this.emit({ type: "session.created", session: { ...meta } });
 
-    this.appendSystem(
-      internal,
-      demo
-        ? "Linked to a **demo console** that behaves like a live `grok` session already signed in with a subscription.\n\nThis app does **not** require an API key for this path. (API keys remain available later for automation.)\n\nSend a prompt; tool calls wait for your approval."
-        : `Waiting for your agent console to join.\n\n**Pairing code: \`${formatPairingCode(code)}\`**\n\nOn the machine where \`grok\` is already logged in (OAuth / subscription):\n\`\`\`\nnode scripts/sendell-bridge.mjs --code ${normalizePairingCode(code)} --hub <this-app-url>\n\`\`\`\nor type \`/remote\` in the agent TUI when available.`,
-    );
-
+    // No chat spam — pairing code is in the waiting banner / dialog only
     if (demo) {
       const token = uid("tok");
       internal.sessionToken = token;
       registerBridge(id, token);
-      this.appendSystem(
-        internal,
-        "Console online · **demo bridge**. Real path: subscription session on your machine + bridge.",
-      );
     }
 
     return this.getSnapshot(id)!;
@@ -224,7 +215,7 @@ class Hub {
     const now = Date.now();
     const meta: SessionMeta = {
       id,
-      title: "Joining console…",
+      title: "New remote",
       providerId: "grok-build",
       status: "waiting_link",
       createdAt: now,
@@ -244,10 +235,6 @@ class Hub {
     this.sessions.set(id, internal);
     this.codeIndex.set(normalized, id);
     this.emit({ type: "session.created", session: { ...meta } });
-    this.appendSystem(
-      internal,
-      `Listening for console with code **${formatPairingCode(normalized)}**.\nIf the terminal showed this after \`/remote\`, the bridge should attach shortly.`,
-    );
     return this.getSnapshot(id)!;
   }
 
@@ -268,26 +255,34 @@ class Hub {
     registerBridge(sessionId, token);
 
     const hostLabel = `${input.hostname} · ${input.cwd}`;
+    const bridgeDemo = input.demo === true;
+    const shortTitle =
+      input.cwd?.split(/[/\\]/).filter(Boolean).pop() ||
+      input.hostname ||
+      "Remote";
+
     this.touch(internal, {
       status: "ready",
       linkState: "linked",
-      demo: input.demo === true,
+      demo: false,
       providerId: input.providerId,
       hostLabel,
       cwd: input.cwd,
       model: input.model || input.agentName || input.providerId,
       title:
+        internal.meta.title === "New remote" ||
         internal.meta.title === "Waiting for console…" ||
         internal.meta.title === "Joining console…"
-          ? `${input.agentName || providerLabel(input.providerId)} · ${input.hostname}`
+          ? shortTitle
           : internal.meta.title,
     });
+    if (bridgeDemo) {
+      this.touch(internal, {
+        model: `${input.model || "bridge-demo"} · ${input.hostname}`,
+      });
+    }
 
-    this.appendSystem(
-      internal,
-      `Console linked · **${hostLabel}**\nProvider: ${providerLabel(input.providerId)}${input.demo ? " (demo bridge)" : ""}\nAuthenticated on that machine (subscription / OAuth) — no API key required in this app.`,
-    );
-
+    // No system message in chat — /rc badge + header show link state
     return {
       sessionId,
       sessionToken: token,
@@ -319,6 +314,17 @@ class Hub {
     this.emit({ type: "message.appended", sessionId: s.meta.id, message: userMsg });
     this.touch(s, { status: "thinking" });
 
+    const bridgeLive = !!s.sessionToken && !!getBridgeBySession(s.meta.id);
+    if (bridgeLive) {
+      enqueueCommand(s.meta.id, {
+        id: makeCommandId(),
+        type: "prompt",
+        text: input.text.trim(),
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
     if (s.meta.demo) {
       s.demoAbort?.abort();
       s.demoAbort = new AbortController();
@@ -331,12 +337,7 @@ class Hub {
       return;
     }
 
-    enqueueCommand(s.meta.id, {
-      id: makeCommandId(),
-      type: "prompt",
-      text: input.text.trim(),
-      createdAt: Date.now(),
-    });
+    throw new Error("No bridge connected — re-run sendell-remote on the agent machine");
   }
 
   async resolvePermission(input: PermissionDecisionInput): Promise<void> {
@@ -345,29 +346,32 @@ class Hub {
 
     this.applyPermissionLocal(s, input.toolCallId, input.decision);
 
+    const bridgeLive = !!s.sessionToken && !!getBridgeBySession(s.meta.id);
+    if (bridgeLive) {
+      enqueueCommand(s.meta.id, {
+        id: makeCommandId(),
+        type: "permission",
+        toolCallId: input.toolCallId,
+        decision: input.decision,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
     if (s.meta.demo) {
       const waiter = demoPermissionWaiters.get(`${s.meta.id}:${input.toolCallId}`);
       if (waiter) {
         demoPermissionWaiters.delete(`${s.meta.id}:${input.toolCallId}`);
         waiter(input.decision);
       }
-      return;
     }
-
-    enqueueCommand(s.meta.id, {
-      id: makeCommandId(),
-      type: "permission",
-      toolCallId: input.toolCallId,
-      decision: input.decision,
-      createdAt: Date.now(),
-    });
   }
 
   async cancelSession(sessionId: string): Promise<void> {
     const s = this.sessions.get(sessionId);
     if (!s) return;
     s.demoAbort?.abort();
-    if (!s.meta.demo) {
+    if (getBridgeBySession(sessionId)) {
       enqueueCommand(sessionId, {
         id: makeCommandId(),
         type: "cancel",
@@ -427,11 +431,17 @@ class Hub {
           status: "ready",
           linkState: "linked",
         });
+        // Do not inject hello text into chat
         break;
       case "status":
         this.touch(s, { status: ev.status, lastError: ev.error });
         break;
       case "message":
+        // Drop system noise from bridge/agent CLI
+        if (ev.message.role === "system") {
+          this.touch(s, {});
+          break;
+        }
         s.messages.push(ev.message);
         this.emit({ type: "message.appended", sessionId, message: ev.message });
         this.touch(s, {});
@@ -551,27 +561,10 @@ class Hub {
     });
   }
 
-  private appendSystem(s: InternalSession, text: string) {
-    const msg: ChatMessage = {
-      id: uid("msg"),
-      role: "system",
-      content: [{ type: "text", text }],
-      createdAt: Date.now(),
-    };
-    s.messages.push(msg);
-    this.emit({ type: "message.appended", sessionId: s.meta.id, message: msg });
-    this.touch(s, {});
-  }
-
   ensureDemoSession(): void {
     if (this.seeded) return;
     this.seeded = true;
-    if (this.sessions.size > 0) return;
-    this.createLinkRoom({
-      providerId: "grok-build",
-      title: "Demo console · Grok Build",
-      demo: true,
-    });
+    // Do not auto-seed noisy demo on boot — empty start is cleaner
   }
 }
 

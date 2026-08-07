@@ -1,6 +1,7 @@
 import { Link2, Menu, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SessionSnapshot, ToolCall } from "@/lib/hub/types";
+import { cn } from "@/lib/utils/cn";
 import { Composer } from "./composer";
 import { MessageList } from "./message-list";
 import { ProviderBadge } from "./provider-badge";
@@ -37,8 +38,7 @@ export function ChatPanel({
             Sendell Remote Control
           </h2>
           <p className="mt-2 max-w-sm text-sm text-fg-muted leading-relaxed">
-            Link a console that is already running with your agent subscription.
-            Chat from anywhere — no API keys here.
+            Link a live agent console. Chat from your phone — no API keys here.
           </p>
         </div>
         <div className="mt-2 flex flex-wrap justify-center gap-2">
@@ -61,11 +61,17 @@ export function ChatPanel({
 
   const pending = snapshot.pendingPermissions[0];
   const waiting = snapshot.linkState === "waiting";
+  const linked = snapshot.linkState === "linked";
   const busy =
     sending ||
     snapshot.status === "thinking" ||
     snapshot.status === "streaming" ||
     snapshot.status === "awaiting_permission";
+
+  const projectName =
+    snapshot.cwd?.split(/[/\\]/).filter(Boolean).pop() ||
+    snapshot.hostLabel?.split("·")[0]?.trim() ||
+    snapshot.title;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-bg">
@@ -87,36 +93,47 @@ export function ChatPanel({
             <h1 className="truncate font-display text-sm font-semibold tracking-tight text-fg sm:text-base">
               {snapshot.title}
             </h1>
+            {linked && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-md border border-success/40 bg-success/15 px-1.5 py-0.5",
+                  "font-mono text-[10px] font-semibold tracking-wide text-success",
+                )}
+                title="Remote control active"
+              >
+                /rc
+              </span>
+            )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-4">
             <ProviderBadge providerId={snapshot.providerId} demo={snapshot.demo} />
-            <span className="text-[11px] text-fg-subtle">
-              {statusLabel(snapshot.status)}
-              {snapshot.hostLabel ? ` · ${snapshot.hostLabel}` : ""}
-            </span>
+            {linked && projectName && (
+              <span className="truncate text-[11px] text-fg-subtle">{projectName}</span>
+            )}
+            {!linked && (
+              <span className="text-[11px] text-fg-subtle">{statusLabel(snapshot.status)}</span>
+            )}
           </div>
         </div>
       </header>
 
       {waiting && (
         <div className="border-b border-warning/30 bg-warning/10 px-4 py-3 text-center">
-          <p className="text-xs font-medium text-warning">Waiting for console</p>
+          <p className="text-xs font-medium text-warning">Pairing code</p>
           {snapshot.pairingCode && (
             <p className="mt-1 font-mono text-2xl font-semibold tracking-[0.2em] text-fg">
               {snapshot.pairingCode}
             </p>
           )}
           <p className="mt-1.5 text-[11px] text-fg-muted">
-            Run the bridge on your agent machine with this code
+            Run <code className="text-primary">/remote-sendell</code> in the agent with this code
           </p>
         </div>
       )}
 
       {pending && (
         <div className="border-b border-warning/30 bg-warning/10 px-3 py-2.5 sm:px-4">
-          <p className="mb-2 text-xs font-medium text-warning">
-            Console requests permission
-          </p>
+          <p className="mb-2 text-xs font-medium text-warning">Permission needed</p>
           <ToolCallCard
             tool={pending}
             onAllow={() => onAllow(pending)}
@@ -134,23 +151,16 @@ export function ChatPanel({
       </div>
 
       <Composer
-        sending={busy}
-        disabled={
-          waiting ||
-          snapshot.linkState !== "linked" ||
-          snapshot.status === "error" ||
-          snapshot.status === "closed" ||
-          snapshot.status === "disconnected" ||
-          snapshot.status === "connecting"
-        }
+        disabled={waiting || snapshot.status === "closed"}
+        sending={busy && !pending}
         onSend={onSend}
         onCancel={onCancel}
         placeholder={
           waiting
-            ? "Link the console first…"
-            : snapshot.status === "awaiting_permission"
-              ? "Approve or reject the tool call above…"
-              : "Message linked console…"
+            ? "Waiting for console…"
+            : pending
+              ? "Approve or reject above…"
+              : "Message…"
         }
       />
     </div>

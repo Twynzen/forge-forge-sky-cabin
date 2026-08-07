@@ -81,20 +81,10 @@ function ContentBlocks({
           return (
             <div
               key={i}
-              className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-fg/95"
+              className="whitespace-pre-wrap text-sm leading-relaxed text-inherit"
             >
               {renderMarkdownLite(b.text)}
             </div>
-          );
-        }
-        if (b.type === "code") {
-          return (
-            <pre
-              key={i}
-              className="overflow-x-auto rounded-lg border border-border bg-bg p-3 font-mono text-xs text-fg-muted"
-            >
-              {b.code}
-            </pre>
           );
         }
         if (b.type === "tool_call") {
@@ -102,16 +92,8 @@ function ContentBlocks({
             <ToolCallCard
               key={i}
               tool={b.toolCall}
-              onAllow={
-                b.toolCall.status === "awaiting_permission" && onAllow
-                  ? () => onAllow(b.toolCall)
-                  : undefined
-              }
-              onReject={
-                b.toolCall.status === "awaiting_permission" && onReject
-                  ? () => onReject(b.toolCall)
-                  : undefined
-              }
+              onAllow={onAllow}
+              onReject={onReject}
             />
           );
         }
@@ -133,13 +115,16 @@ export function MessageList({
   onAllow?: (tool: ToolCall) => void;
   onReject?: (tool: ToolCall) => void;
 }) {
-  const endRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Hide system/link noise — status is the /rc badge in the header
+  const visible = messages.filter((m) => m.role !== "system");
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, messages[messages.length - 1]?.content]);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [visible.length, visible[visible.length - 1]?.content]);
 
-  if (messages.length === 0) {
+  if (visible.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <div className="flex size-14 items-center justify-center rounded-2xl border border-border bg-bg-subtle">
@@ -147,11 +132,10 @@ export function MessageList({
         </div>
         <div>
           <p className="font-display text-lg font-medium tracking-tight text-fg">
-            Ready to control
+            Ready
           </p>
           <p className="mt-1 max-w-xs text-sm text-fg-muted leading-relaxed">
-            Send a prompt to your agent. Tool calls will pause for your approval
-            on this device.
+            Send a message when the console shows <span className="text-primary">/rc</span>.
           </p>
         </div>
       </div>
@@ -160,18 +144,7 @@ export function MessageList({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:px-5">
-      {messages.map((m) => {
-        if (m.role === "system") {
-          return (
-            <div
-              key={m.id}
-              className="mx-auto max-w-md rounded-xl border border-border/80 bg-bg-subtle/50 px-3.5 py-2.5 text-center text-xs text-fg-muted leading-relaxed animate-fade-up"
-            >
-              <ContentBlocks blocks={m.content} />
-            </div>
-          );
-        }
-
+      {visible.map((m) => {
         if (m.role === "thought") {
           return (
             <div
@@ -219,21 +192,24 @@ export function MessageList({
                   : "rounded-tl-md border border-border bg-card",
               )}
             >
-              <div className={cn(isUser && "[&_strong]:text-primary-fg [&_code]:bg-primary-fg/15 [&_code]:text-primary-fg")}>
-                <ContentBlocks
-                  blocks={m.content}
-                  onAllow={onAllow}
-                  onReject={onReject}
+              <ContentBlocks
+                blocks={m.content}
+                onAllow={onAllow}
+                onReject={onReject}
+              />
+              {m.streaming && (
+                <span
+                  className={cn(
+                    "mt-1 inline-block size-1.5 rounded-full animate-pulse-dot",
+                    isUser ? "bg-primary-fg/80" : "bg-primary",
+                  )}
                 />
-              </div>
-              {m.streaming && !isUser && (
-                <span className="mt-1 inline-block size-1.5 rounded-full bg-primary animate-pulse-dot" />
               )}
             </div>
           </div>
         );
       })}
-      <div ref={endRef} className="h-px" />
+      <div ref={bottomRef} />
     </div>
   );
 }
