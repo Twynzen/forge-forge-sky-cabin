@@ -18,9 +18,7 @@ export const Route = createRootRoute({
         content:
           "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover",
       },
-      {
-        title: "Sendell Remote Control",
-      },
+      { title: "Sendell Remote Control" },
       {
         name: "description",
         content:
@@ -37,10 +35,7 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      {
-        rel: "preconnect",
-        href: "https://fonts.googleapis.com",
-      },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {
         rel: "preconnect",
         href: "https://fonts.gstatic.com",
@@ -80,8 +75,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
           position="top-center"
           toastOptions={{
             classNames: {
-              toast:
-                "bg-bg-elevated border border-border text-fg shadow-soft",
+              toast: "bg-bg-elevated border border-border text-fg shadow-soft",
             },
           }}
         />
@@ -89,11 +83,17 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                  navigator.serviceWorker.register('/sw.js').catch(() => {});
+              (function () {
+                if (!('serviceWorker' in navigator)) return;
+                navigator.serviceWorker.getRegistrations().then(function (regs) {
+                  regs.forEach(function (r) { r.unregister(); });
                 });
-              }
+                if (window.caches && caches.keys) {
+                  caches.keys().then(function (keys) {
+                    keys.forEach(function (k) { caches.delete(k); });
+                  });
+                }
+              })();
             `,
           }}
         />
