@@ -1,7 +1,7 @@
 /**
  * In-memory bridge session tokens & command queues.
- * A bridge process (next to `grok` / Claude Code) holds a sessionToken
- * and long-polls for phone commands; pushes ACP-mirrored events back.
+ * Liveness = lastSeenAt (heartbeat / long-poll). When Grok/Ctrl+C dies,
+ * lastSeenAt ages out and the hub marks the console offline.
  */
 
 import type { BridgeCommand } from "./types";
@@ -34,11 +34,15 @@ function tokenIndex() {
 }
 
 export function registerBridge(sessionId: string, sessionToken: string): BridgeConnection {
+  const existing = bridges().get(sessionId);
+  if (existing) {
+    tokenIndex().delete(existing.sessionToken);
+  }
   const conn: BridgeConnection = {
     sessionId,
     sessionToken,
     lastSeenAt: Date.now(),
-    commandQueue: [],
+    commandQueue: existing?.commandQueue ?? [],
     waiters: [],
   };
   bridges().set(sessionId, conn);
@@ -54,6 +58,10 @@ export function getBridgeByToken(token: string): BridgeConnection | null {
 
 export function getBridgeBySession(sessionId: string): BridgeConnection | null {
   return bridges().get(sessionId) ?? null;
+}
+
+export function listBridges(): BridgeConnection[] {
+  return Array.from(bridges().values());
 }
 
 export function unregisterBridge(sessionId: string): void {
@@ -76,7 +84,6 @@ export function enqueueCommand(sessionId: string, cmd: BridgeCommand): void {
   }
 }
 
-/** Long-poll: resolve when commands available or timeout */
 export function waitForCommands(
   sessionId: string,
   timeoutMs = 25000,
