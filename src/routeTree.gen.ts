@@ -15,6 +15,7 @@ import { Route as ApiBridgeCommandsRouteImport } from './routes/api/bridge/comma
 import { Route as ApiBridgeEventsRouteImport } from './routes/api/bridge/events'
 import { Route as ApiBridgeHeartbeatRouteImport } from './routes/api/bridge/heartbeat'
 import { Route as ApiBridgePairRouteImport } from './routes/api/bridge/pair'
+import { Route as ApiHubSplatRouteImport } from './routes/api/hub/$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const ApiBridgePairRoute = ApiBridgePairRouteImport.update({
   path: '/api/bridge/pair',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHubSplatRoute = ApiHubSplatRouteImport.update({
+  id: '/api/hub/$',
+  path: '/api/hub/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/api/bridge/events': typeof ApiBridgeEventsRoute
   '/api/bridge/heartbeat': typeof ApiBridgeHeartbeatRoute
   '/api/bridge/pair': typeof ApiBridgePairRoute
+  '/api/hub/$': typeof ApiHubSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/api/bridge/events': typeof ApiBridgeEventsRoute
   '/api/bridge/heartbeat': typeof ApiBridgeHeartbeatRoute
   '/api/bridge/pair': typeof ApiBridgePairRoute
+  '/api/hub/$': typeof ApiHubSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/api/bridge/events': typeof ApiBridgeEventsRoute
   '/api/bridge/heartbeat': typeof ApiBridgeHeartbeatRoute
   '/api/bridge/pair': typeof ApiBridgePairRoute
+  '/api/hub/$': typeof ApiHubSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/api/bridge/events'
     | '/api/bridge/heartbeat'
     | '/api/bridge/pair'
+    | '/api/hub/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/api/bridge/events'
     | '/api/bridge/heartbeat'
     | '/api/bridge/pair'
+    | '/api/hub/$'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/api/bridge/events'
     | '/api/bridge/heartbeat'
     | '/api/bridge/pair'
+    | '/api/hub/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +118,7 @@ export interface RootRouteChildren {
   ApiBridgeEventsRoute: typeof ApiBridgeEventsRoute
   ApiBridgeHeartbeatRoute: typeof ApiBridgeHeartbeatRoute
   ApiBridgePairRoute: typeof ApiBridgePairRoute
+  ApiHubSplatRoute: typeof ApiHubSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -152,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiBridgePairRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/hub/$': {
+      id: '/api/hub/$'
+      path: '/api/hub/$'
+      fullPath: '/api/hub/$'
+      preLoaderRoute: typeof ApiHubSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiBridgeEventsRoute: ApiBridgeEventsRoute,
   ApiBridgeHeartbeatRoute: ApiBridgeHeartbeatRoute,
   ApiBridgePairRoute: ApiBridgePairRoute,
+  ApiHubSplatRoute: ApiHubSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

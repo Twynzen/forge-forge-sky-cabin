@@ -1,94 +1,95 @@
 /**
- * Server functions — phone ↔ hub boundary.
- * The phone never receives or stores provider API keys.
+ * Client hub API — plain fetch to /api/hub/*
+ * (Replaces createServerFn to avoid Invalid server function ID on Vite/Windows.)
  */
 
-import { createServerFn } from "@tanstack/react-start";
 import type {
   CreateLinkRoomInput,
   JoinWithCodeInput,
   PermissionDecisionInput,
-  ProviderId,
+  ProviderInfo,
   SendPromptInput,
+  SessionMeta,
+  SessionSnapshot,
 } from "../hub/types";
 
-async function hub() {
-  const { getHub } = await import("../hub/hub");
-  return getHub();
+async function api<T>(
+  path: string,
+  init?: RequestInit & { json?: unknown },
+): Promise<T> {
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string>),
+  };
+  let body = init?.body;
+  if (init?.json !== undefined) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(init.json);
+  }
+  const res = await fetch(path, { ...init, headers, body });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      (data as { error?: string }).error || `${res.status} ${path}`,
+    );
+  }
+  return data as T;
 }
 
-export const listProvidersFn = createServerFn({ method: "GET" }).handler(
-  async () => (await hub()).listProviders(),
-);
+/** Compatible call shapes with previous createServerFn usage */
+export async function listProvidersFn(): Promise<ProviderInfo[]> {
+  return api("/api/hub/providers");
+}
 
-export const listSessionsFn = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const h = await hub();
-    h.ensureDemoSession();
-    return h.listSessions();
-  },
-);
+export async function listSessionsFn(): Promise<SessionMeta[]> {
+  return api("/api/hub/sessions");
+}
 
-export const getSessionFn = createServerFn({ method: "GET" })
-  .validator((data: { sessionId: string }) => data)
-  .handler(async ({ data }) => {
-    const snap = (await hub()).getSnapshot(data.sessionId);
-    if (!snap) throw new Error("Session not found");
-    return snap;
-  });
+export async function getSessionFn(opts: {
+  data: { sessionId: string };
+}): Promise<SessionSnapshot> {
+  return api(
+    `/api/hub/session?id=${encodeURIComponent(opts.data.sessionId)}`,
+  );
+}
 
-/** Phone creates a room and shows a pairing code for the console */
-export const createLinkRoomFn = createServerFn({ method: "POST" })
-  .validator((data: CreateLinkRoomInput) => data)
-  .handler(async ({ data }) => {
-    return (await hub()).createLinkRoom({
-      providerId: (data.providerId || "grok-build") as ProviderId,
-      title: data.title,
-      demo: data.demo === true,
-    });
-  });
+export async function createLinkRoomFn(opts: {
+  data: CreateLinkRoomInput;
+}): Promise<SessionSnapshot> {
+  return api("/api/hub/room", { method: "POST", json: opts.data });
+}
 
-/** Phone enters a code printed by the terminal (/remote) */
-export const joinWithCodeFn = createServerFn({ method: "POST" })
-  .validator((data: JoinWithCodeInput) => data)
-  .handler(async ({ data }) => {
-    return (await hub()).joinWithCode(data.code);
-  });
+export async function joinWithCodeFn(opts: {
+  data: JoinWithCodeInput;
+}): Promise<SessionSnapshot> {
+  return api("/api/hub/join", { method: "POST", json: opts.data });
+}
 
-export const sendPromptFn = createServerFn({ method: "POST" })
-  .validator((data: SendPromptInput) => data)
-  .handler(async ({ data }) => {
-    await (await hub()).sendPrompt(data);
-    return { ok: true as const };
-  });
+export async function startPromptFn(opts: {
+  data: SendPromptInput;
+}): Promise<{ ok: true; started: true }> {
+  return api("/api/hub/prompt", { method: "POST", json: opts.data });
+}
 
-export const startPromptFn = createServerFn({ method: "POST" })
-  .validator((data: SendPromptInput) => data)
-  .handler(async ({ data }) => {
-    const h = await hub();
-    void h.sendPrompt(data).catch((err) => {
-      console.error("[hub] prompt error", err);
-    });
-    return { ok: true as const, started: true as const };
-  });
+export async function sendPromptFn(opts: {
+  data: SendPromptInput;
+}): Promise<{ ok: true }> {
+  return api("/api/hub/prompt", { method: "POST", json: opts.data });
+}
 
-export const resolvePermissionFn = createServerFn({ method: "POST" })
-  .validator((data: PermissionDecisionInput) => data)
-  .handler(async ({ data }) => {
-    await (await hub()).resolvePermission(data);
-    return { ok: true as const };
-  });
+export async function resolvePermissionFn(opts: {
+  data: PermissionDecisionInput;
+}): Promise<{ ok: true }> {
+  return api("/api/hub/permission", { method: "POST", json: opts.data });
+}
 
-export const cancelSessionFn = createServerFn({ method: "POST" })
-  .validator((data: { sessionId: string }) => data)
-  .handler(async ({ data }) => {
-    await (await hub()).cancelSession(data.sessionId);
-    return { ok: true as const };
-  });
+export async function cancelSessionFn(opts: {
+  data: { sessionId: string };
+}): Promise<{ ok: true }> {
+  return api("/api/hub/cancel", { method: "POST", json: opts.data });
+}
 
-export const closeSessionFn = createServerFn({ method: "POST" })
-  .validator((data: { sessionId: string }) => data)
-  .handler(async ({ data }) => {
-    await (await hub()).closeSession(data.sessionId);
-    return { ok: true as const };
-  });
+export async function closeSessionFn(opts: {
+  data: { sessionId: string };
+}): Promise<{ ok: true }> {
+  return api("/api/hub/close", { method: "POST", json: opts.data });
+}
