@@ -20,7 +20,7 @@ import type { ProviderId, ProviderInfo, SessionSnapshot } from "@/lib/hub/types"
 import { cn } from "@/lib/utils/cn";
 
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
-type CopyKind = "rc" | "install" | null;
+type CopyKind = "rc" | "install" | "installAgent" | null;
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -53,7 +53,6 @@ function hubUrl() {
   return window.location.origin;
 }
 
-/** Only the live room code — never a hardcoded sample */
 function liveCode(room: SessionSnapshot | null): string {
   return (room?.pairingCode ?? "").replace(/-/g, "");
 }
@@ -64,26 +63,35 @@ function buildShortRc(room: SessionSnapshot | null) {
   return `rc ${code}`;
 }
 
-/**
- * One-time install — generic paths for ANY machine.
- * No personal folders. User runs from their clone of Sendell; --project = current project.
- */
-function buildInstallOnce(hub: string) {
-  return `# One-time setup (any PC) — run in a terminal, NOT inside Grok chat
-# 1) Open a shell in YOUR Sendell repo clone (wherever you put it)
+/** Shell one-time install — generic paths */
+function buildInstallShell(hub: string) {
+  return `# One-time (any PC) — in a terminal, from YOUR Sendell clone:
 cd path/to/your/sendell-remote-control
-
-# 2) Install skill + save hub (uses the project folder you care about)
-#    Windows PowerShell:
-node .\\scripts\\install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
-
-#    macOS / Linux (from the project you want to control, e.g. your app repo):
-#    node /path/to/sendell/scripts/install-remote-sendell.mjs --hub ${hub} --project "$PWD"
-
-# After this, every Grok session only needs:
-#   rc THE_CODE_FROM_THE_PHONE
-# (the code is new each time you Link console — never reuse an old sample code)
+node ./scripts/install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
+# macOS/Linux: --project "$PWD"
+# Then in Grok only:  rc THE_CODE_FROM_PHONE
 `;
+}
+
+/**
+ * Prompt the agent runs itself (accessibility).
+ * No personal paths — agent must discover Sendell clone on disk.
+ */
+function buildInstallAgentPrompt(hub: string) {
+  return `Install Sendell remote-control skill ONCE on this machine (you run the commands).
+
+Hub for this phone app: ${hub}
+
+Do this:
+1) Find the Sendell Remote Control repo on this computer (folder that contains scripts/install-remote-sendell.mjs and scripts/sendell-remote.mjs). Search common locations if needed; ask me only if you cannot find it.
+2) From that repo, run (PowerShell example):
+   node .\\scripts\\install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
+   Use the CURRENT project directory as --project (where I am working now).
+   On macOS/Linux: node ./scripts/install-remote-sendell.mjs --hub ${hub} --project "$PWD"
+3) Confirm ~/.sendell/config.json (or %USERPROFILE%\\.sendell\\config.json) exists and print hub + scriptPath only.
+4) Say when done: "sendell install ok — next time use: rc CODE"
+
+Do not invent API keys. Do not use a sample pairing code. Pairing codes always come fresh from the phone Link console.`;
 }
 
 export function LinkSessionDialog({
@@ -167,8 +175,10 @@ export function LinkSessionDialog({
     }
   };
 
+  const hub = hubUrl();
   const rcLine = buildShortRc(room);
-  const installText = buildInstallOnce(hubUrl());
+  const installShell = buildInstallShell(hub);
+  const installAgent = buildInstallAgentPrompt(hub);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -179,9 +189,7 @@ export function LinkSessionDialog({
             Link a console
           </DialogTitle>
           <DialogDescription>
-            Each link creates a <strong className="text-fg">new</strong> code. In
-            Grok type only <code className="text-primary">rc CODIGO</code> for{" "}
-            <em>this</em> room.
+            Fresh code per room. Optional: let the agent install the skill once.
           </DialogDescription>
         </DialogHeader>
 
@@ -196,7 +204,7 @@ export function LinkSessionDialog({
               <div>
                 <p className="text-sm font-medium text-fg">Phone shows code</p>
                 <p className="text-xs text-fg-muted">
-                  Copy <code className="text-primary">rc …</code> for this session
+                  Then <code className="text-primary">rc CODIGO</code> in Grok
                 </p>
               </div>
             </button>
@@ -285,52 +293,49 @@ export function LinkSessionDialog({
 
         {mode === "room_ready" && room && liveCode(room) && (
           <div className="space-y-4">
-            {/* THIS session only */}
             <div className="rounded-2xl border border-primary/25 bg-primary/5 px-4 py-5 text-center">
               <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-                This room only — paste in Grok
+                This room — paste in Grok
               </p>
               <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary">
                 {rcLine}
               </p>
-              <p className="mt-1 text-[11px] text-fg-subtle break-all">
-                hub {hubUrl()}
-              </p>
+              <p className="mt-1 text-[11px] text-fg-subtle break-all">hub {hub}</p>
               <Button
-                className="mt-3 w-full sm:w-auto"
+                className="mt-3 w-full"
                 size="sm"
                 onClick={() => void doCopy("rc", rcLine)}
               >
-                {copied === "rc" ? (
+                {copied === "rc" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                {copied === "rc" ? "Copied!" : "Copy rc + code (this room)"}
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
+              <p className="font-medium text-fg">First time on this PC?</p>
+              <p>
+                Let the agent install the skill for you (recommended), or run
+                shell commands yourself.
+              </p>
+              <Button
+                size="sm"
+                className="w-full"
+                onClick={() => void doCopy("installAgent", installAgent)}
+              >
+                {copied === "installAgent" ? (
                   <Check className="size-3.5" />
                 ) : (
                   <Copy className="size-3.5" />
                 )}
-                {copied === "rc" ? "Copied!" : "Copy rc + code for this room"}
+                {copied === "installAgent"
+                  ? "Copied — paste into Grok once"
+                  : "Copy install prompt for Grok (agent installs)"}
               </Button>
-              {copyFailed && (
-                <p className="mt-2 text-[11px] text-warning">
-                  Clipboard blocked — type manually:{" "}
-                  <span className="font-mono text-primary">{rcLine}</span>
-                </p>
-              )}
-            </div>
-
-            {/* One-time install — separate action, generic paths */}
-            <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
-              <p className="font-medium text-fg">First time on this PC only</p>
-              <p>
-                Install once so Grok understands <code className="text-primary">rc</code>.
-                Paths are generic — use <em>your</em> Sendell clone and project folder.
-              </p>
-              <pre className="overflow-x-auto rounded-lg border border-border bg-bg p-2 font-mono text-[10px] text-fg-muted whitespace-pre-wrap">
-                {installText}
-              </pre>
               <Button
                 size="sm"
                 variant="secondary"
                 className="w-full"
-                onClick={() => void doCopy("install", installText)}
+                onClick={() => void doCopy("install", installShell)}
               >
                 {copied === "install" ? (
                   <Check className="size-3.5" />
@@ -338,15 +343,21 @@ export function LinkSessionDialog({
                   <Copy className="size-3.5" />
                 )}
                 {copied === "install"
-                  ? "Install instructions copied!"
-                  : "Copy one-time install commands"}
+                  ? "Shell install copied"
+                  : "Copy shell install (manual terminal)"}
               </Button>
               <p className="text-fg-subtle">
-                This button does <strong className="text-fg">not</strong> copy a
-                pairing code. Linking always uses the green{" "}
-                <code className="text-primary">rc …</code> above.
+                Install does <strong className="text-fg">not</strong> link a room.
+                After install, use the green <code className="text-primary">rc …</code>{" "}
+                above with a <em>fresh</em> code.
               </p>
             </div>
+
+            {copyFailed && (
+              <p className="text-center text-[11px] text-warning">
+                Clipboard blocked — select text manually.
+              </p>
+            )}
 
             <Button className="w-full" onClick={() => handleOpenChange(false)}>
               Done
