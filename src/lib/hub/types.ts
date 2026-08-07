@@ -81,6 +81,8 @@ export interface ChatMessage {
   content: ContentBlock[];
   createdAt: number;
   streaming?: boolean;
+  /** phone | console — where the human typed */
+  meta?: { source?: "phone" | "console" };
 }
 
 export type LinkState = "waiting" | "linked" | "disconnected";

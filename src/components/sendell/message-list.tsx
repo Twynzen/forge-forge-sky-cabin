@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Bot, Brain, User } from "lucide-react";
 import type { ChatMessage, ContentBlock, ToolCall } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
@@ -106,6 +106,15 @@ function ContentBlocks({
   );
 }
 
+function messageFingerprint(messages: ChatMessage[]): string {
+  const last = messages[messages.length - 1];
+  if (!last) return "0";
+  const text = last.content
+    .map((c) => (c.type === "text" ? c.text : c.type))
+    .join("|");
+  return `${messages.length}:${last.id}:${last.streaming ? 1 : 0}:${text.length}`;
+}
+
 export function MessageList({
   messages,
   onAllow,
@@ -115,14 +124,30 @@ export function MessageList({
   onAllow?: (tool: ToolCall) => void;
   onReject?: (tool: ToolCall) => void;
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  /** Only stick to bottom if user is already near bottom */
+  const stickToBottom = useRef(true);
+  const lastFp = useRef("");
 
   // Hide system/link noise — status is the /rc badge in the header
   const visible = messages.filter((m) => m.role !== "system");
+  const fp = messageFingerprint(visible);
+
+  const onScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottom.current = gap < 80;
+  }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [visible.length, visible[visible.length - 1]?.content]);
+    if (fp === lastFp.current) return;
+    lastFp.current = fp;
+    if (!stickToBottom.current) return;
+    // Jump without smooth when streaming chunks (less fight with user scroll)
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [fp]);
 
   if (visible.length === 0) {
     return (
@@ -144,70 +169,82 @@ export function MessageList({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:px-5">
-      {visible.map((m) => {
-        if (m.role === "thought") {
-          return (
-            <div key={m.id} className="flex gap-2.5 animate-fade-up opacity-90">
-              <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg bg-thought/10 text-thought">
-                <Brain className="size-3.5" />
+    <div
+      ref={scrollerRef}
+      onScroll={onScroll}
+      className="h-full overflow-y-auto overscroll-contain"
+    >
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:px-5">
+        {visible.map((m) => {
+          if (m.role === "thought") {
+            return (
+              <div key={m.id} className="flex gap-2.5 animate-fade-up opacity-90">
+                <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg bg-thought/10 text-thought">
+                  <Brain className="size-3.5" />
+                </div>
+                <div className="min-w-0 flex-1 rounded-xl border border-thought/15 bg-thought/5 px-3 py-2 text-sm text-thought/90 italic">
+                  <ContentBlocks blocks={m.content} />
+                  {m.streaming && (
+                    <span className="ml-1 inline-block size-1.5 rounded-full bg-thought animate-pulse-dot" />
+                  )}
+                </div>
               </div>
-              <div className="min-w-0 flex-1 rounded-xl border border-thought/15 bg-thought/5 px-3 py-2 text-sm text-thought/90 italic">
-                <ContentBlocks blocks={m.content} />
+            );
+          }
+
+          const isUser = m.role === "user";
+          const fromConsole = m.meta?.source === "console";
+
+          return (
+            <div
+              key={m.id}
+              className={cn(
+                "flex gap-2.5 animate-fade-up",
+                isUser && "flex-row-reverse",
+              )}
+            >
+              <div
+                className={cn(
+                  "mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg",
+                  isUser
+                    ? "bg-primary/15 text-primary"
+                    : "bg-bg-muted text-fg-muted",
+                )}
+              >
+                {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
+              </div>
+              <div
+                className={cn(
+                  "min-w-0 max-w-[min(100%,36rem)] rounded-2xl px-3.5 py-2.5",
+                  isUser
+                    ? "rounded-tr-md bg-primary text-primary-fg"
+                    : "rounded-tl-md border border-border bg-card",
+                )}
+              >
+                {isUser && fromConsole && (
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-primary-fg/70">
+                    Console
+                  </p>
+                )}
+                <ContentBlocks
+                  blocks={m.content}
+                  onAllow={onAllow}
+                  onReject={onReject}
+                />
                 {m.streaming && (
-                  <span className="ml-1 inline-block size-1.5 rounded-full bg-thought animate-pulse-dot" />
+                  <span
+                    className={cn(
+                      "mt-1 inline-block size-1.5 rounded-full animate-pulse-dot",
+                      isUser ? "bg-primary-fg/80" : "bg-primary",
+                    )}
+                  />
                 )}
               </div>
             </div>
           );
-        }
-
-        const isUser = m.role === "user";
-
-        return (
-          <div
-            key={m.id}
-            className={cn(
-              "flex gap-2.5 animate-fade-up",
-              isUser && "flex-row-reverse",
-            )}
-          >
-            <div
-              className={cn(
-                "mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg",
-                isUser
-                  ? "bg-primary/15 text-primary"
-                  : "bg-bg-muted text-fg-muted",
-              )}
-            >
-              {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
-            </div>
-            <div
-              className={cn(
-                "min-w-0 max-w-[min(100%,36rem)] rounded-2xl px-3.5 py-2.5",
-                isUser
-                  ? "rounded-tr-md bg-primary text-primary-fg"
-                  : "rounded-tl-md border border-border bg-card",
-              )}
-            >
-              <ContentBlocks
-                blocks={m.content}
-                onAllow={onAllow}
-                onReject={onReject}
-              />
-              {m.streaming && (
-                <span
-                  className={cn(
-                    "mt-1 inline-block size-1.5 rounded-full animate-pulse-dot",
-                    isUser ? "bg-primary-fg/80" : "bg-primary",
-                  )}
-                />
-              )}
-            </div>
-          </div>
-        );
-      })}
-      <div ref={bottomRef} />
+        })}
+        <div ref={bottomRef} className="h-px shrink-0" />
+      </div>
     </div>
   );
 }

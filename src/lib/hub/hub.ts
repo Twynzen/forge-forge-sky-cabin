@@ -394,6 +394,7 @@ class Hub {
       role: "user",
       content: [{ type: "text", text: input.text }],
       createdAt: Date.now(),
+      meta: { source: "phone" },
     };
     s.messages.push(userMsg);
     this.emit({ type: "message.appended", sessionId: s.meta.id, message: userMsg });

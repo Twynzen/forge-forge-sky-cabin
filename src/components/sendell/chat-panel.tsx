@@ -126,7 +126,7 @@ export function ChatPanel({
             </p>
           )}
           <p className="mt-1.5 text-[11px] text-fg-muted">
-            Run <code className="text-primary">/remote-sendell</code> in the agent with this code
+            Type <code className="text-primary">rc CODIGO</code> in the agent
           </p>
         </div>
       )}
@@ -142,7 +142,8 @@ export function ChatPanel({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Single scroll owner lives inside MessageList */}
+      <div className="min-h-0 flex-1">
         <MessageList
           messages={snapshot.messages}
           onAllow={onAllow}

@@ -185,6 +185,42 @@ async function cmdWait() {
   process.exit(0);
 }
 
+
+async function cmdNoteUser() {
+  const cwd = resolve(String(arg("cwd", process.cwd())));
+  const session = loadSession(cwd);
+  let text = arg("text", "");
+  const file = arg("file", "");
+  if (file && file !== true) {
+    text = readFileSync(String(file), "utf8");
+  }
+  text = String(text || "").trim();
+  if (!text) {
+    console.error('Usage: note-user --text "..."');
+    process.exit(1);
+  }
+  const msgId = uid("msg");
+  await api(session.hub, "/api/bridge/events", {
+    method: "POST",
+    body: JSON.stringify({
+      token: session.sessionToken,
+      events: [
+        {
+          type: "message",
+          message: {
+            id: msgId,
+            role: "user",
+            content: [{ type: "text", text }],
+            createdAt: Date.now(),
+            meta: { source: "console" },
+          },
+        },
+      ],
+    }),
+  });
+  console.log("ok");
+}
+
 async function cmdReply() {
   const cwd = resolve(String(arg("cwd", process.cwd())));
   const session = loadSession(cwd);
@@ -195,13 +231,36 @@ async function cmdReply() {
   }
   text = String(text || "").trim();
   if (!text) {
-    console.error('Usage: reply --text "..." | --file path');
+    console.error('Usage: reply --text "..." [--user "..."] | --file path');
     process.exit(1);
   }
 
   const msgId = uid("msg");
   const token = session.sessionToken;
   const hub = session.hub;
+
+  // Optional: mirror local keyboard prompt so phone sees human side
+  const userText = String(arg("user", "") || "").trim();
+  if (userText) {
+    await api(hub, "/api/bridge/events", {
+      method: "POST",
+      body: JSON.stringify({
+        token,
+        events: [
+          {
+            type: "message",
+            message: {
+              id: uid("msg"),
+              role: "user",
+              content: [{ type: "text", text: userText }],
+              createdAt: Date.now(),
+              meta: { source: "console" },
+            },
+          },
+        ],
+      }),
+    });
+  }
 
   await api(hub, "/api/bridge/events", {
     method: "POST",
@@ -271,10 +330,11 @@ function cmdStatus() {
 }
 
 function help() {
-  console.log(`sendell-remote: pair | wait | reply | status
+  console.log(`sendell-remote: pair | wait | reply | note-user | status
   pair  --code X --hub URL [--cwd DIR]   → prints: rc
   wait  [--timeout 0]                    → 0=forever (default), idle = no LLM
-  reply --text "..." | --file f          → prints: ok
+  note-user --text "..."                 → mirror local human msg to phone
+  reply --text "..." [--user "..."]      → assistant (+ optional local user)
 Env: SENDELL_HUB`);
 }
 
@@ -282,6 +342,7 @@ const commands = {
   pair: cmdPair,
   wait: cmdWait,
   reply: cmdReply,
+  "note-user": cmdNoteUser,
   status: cmdStatus,
   help,
 };
