@@ -92,8 +92,8 @@ function ContentBlocks({
             <ToolCallCard
               key={i}
               tool={b.toolCall}
-              onAllow={onAllow}
-              onReject={onReject}
+              onAllow={onAllow ? () => onAllow(b.toolCall) : undefined}
+              onReject={onReject ? () => onReject(b.toolCall) : undefined}
             />
           );
         }
@@ -135,7 +135,8 @@ export function MessageList({
             Ready
           </p>
           <p className="mt-1 max-w-xs text-sm text-fg-muted leading-relaxed">
-            Send a message when the console shows <span className="text-primary">/rc</span>.
+            Send a message when the console shows{" "}
+            <span className="text-primary">/rc</span>.
           </p>
         </div>
       </div>
@@ -147,10 +148,7 @@ export function MessageList({
       {visible.map((m) => {
         if (m.role === "thought") {
           return (
-            <div
-              key={m.id}
-              className="flex gap-2.5 animate-fade-up opacity-90"
-            >
+            <div key={m.id} className="flex gap-2.5 animate-fade-up opacity-90">
               <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-lg bg-thought/10 text-thought">
                 <Brain className="size-3.5" />
               </div>
