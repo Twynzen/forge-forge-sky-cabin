@@ -58,59 +58,43 @@ const config = {
 };
 writeFileSync(join(homeSendell, "config.json"), JSON.stringify(config, null, 2));
 
-const skillBody = `# remote-sendell (global)
+const scriptEsc = scriptPath.replace(/\\/g, "\\\\");
 
-When the user message is exactly or starts with:
-- \`rc <CODE>\`
-- \`/remote-sendell <CODE>\`
-- \`/remote-sendell\` (code in same message)
+const skillBody = `# remote-sendell (Sendell phone remote)
 
-## Silent remote control (Cloudy-style)
+## CRITICAL
+\`/remote-sendell CODE\`, \`rs CODE\`, or \`rc CODE\` (6-char from Sendell app) =
+**pair to Sendell hub**. NEVER "Load Claude session as JSON". Claude resume is a different skill.
 
-You are in a **normal** coding session. Remote is a quiet channel.
+## Visible
+- After pair: print only \`rc\`
+- Wait forever (one background shell). No narration.
+- Local keyboard: reply --user "LOCAL" --text "ANSWER"
+- stop: \`rc off\`
 
-### Visible behavior
-- After pair succeeds, say **only**: \`rc on\` (one short line). Nothing else about loops.
-- Do **not** narrate: waiting, timeouts, pair tables, "reinicio wait", tool chatter as prose.
-- Run pair/wait/reply as tools; keep the chat looking like a normal session.
-- When phone sends a prompt, handle \`text\` as if the user typed it **here in this terminal**.
-- Your reply to the user in this TUI should be the real work; also \`reply\` the answer to the phone (answer body only).
-- Local typing in this terminal still works — phone and keyboard are both "user".
-
-### Commands (Windows paths OK)
-
-Config is in ~/.sendell/config.json:
+## Commands
+Config: ~/.sendell/config.json
 - hub: ${hub}
-- script: ${scriptPath.replace(/\\/g, "\\\\")}
+- script: ${scriptEsc}
 
 \`\`\`powershell
 $cfg = Get-Content "$env:USERPROFILE\\.sendell\\config.json" | ConvertFrom-Json
 $sh = $cfg.scriptPath
 $hub = $cfg.hub
-# CODE from user message
 node $sh pair --code CODE --hub $hub --cwd (Get-Location)
-node $sh wait --cwd (Get-Location) --timeout 300000
-# on prompt → work → 
-node $sh reply --cwd (Get-Location) --text "ANSWER_ONLY"
-# wait again silently
+node $sh wait --cwd (Get-Location)
 \`\`\`
-
-### Rules
-- No API keys
-- No sendell-bridge --demo
-- timeout on wait → silent wait again
-- stop / rc off → stop loop, say \`rc off\`
-`;
+`;`;
 
 writeFileSync(join(skillDir, "remote-sendell.md"), skillBody);
 
 // Project snippet
 const snippet = `
-## Sendell remote (\`rc\`)
+## Sendell remote
 
-If the user types \`rc CODE\` or \`/remote-sendell CODE\`, follow **~/.sendell/skills/remote-sendell.md** (or repo skills/remote-sendell/SKILL.md).
-
-One-line activation only. Silent loop. Phone prompts = normal user messages. After pair: only \`rc on\`.
+Prefer: \`/remote-sendell CODE\` or \`rs CODE\` (phone Link console).
+Also: \`rc CODE\` = Sendell pairing when ~/.sendell exists — **not** Claude session resume.
+Follow ~/.sendell/skills/remote-sendell.md. After pair print only \`rc\`. Forever wait.
 `.trim();
 
 writeFileSync(join(homeSendell, "AGENTS.snippet.md"), snippet + "\n");
@@ -160,14 +144,13 @@ Sendell remote installed (one-time)
   Script:  ${scriptPath}
 ${project ? `  Project: ${project} (AGENTS.md updated)\n` : ""}
 How you activate from now on
-  1) Phone: Link console → note the CODE only (6 chars)
-  2) In Grok, in your project folder, type:
-
-       rc CODIGO
-
-  or:
+  1) Phone: Link console → note the CODE (6 chars)
+  2) In Grok prefer (avoids Claude "rc" confusion):
 
        /remote-sendell CODIGO
 
-  No WhatsApp. No long prompt. Grok should say: rc on
+  or short:  rs CODIGO
+  (rc CODIGO also works if Sendell skill wins)
+
+  Grok should print only: rc
 `);

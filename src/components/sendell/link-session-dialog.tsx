@@ -20,7 +20,7 @@ import type { ProviderId, ProviderInfo, SessionSnapshot } from "@/lib/hub/types"
 import { tryCopyText, tryShareText } from "@/lib/utils/copy";
 import { cn } from "@/lib/utils/cn";
 
-export const PAIRING_UI_VERSION = "pairing-ui-v6";
+export const PAIRING_UI_VERSION = "pairing-ui-v7";
 
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
 type PayloadKind = "rc" | "installAgent" | "installShell";
@@ -37,7 +37,8 @@ function liveCode(room: SessionSnapshot | null): string {
 function buildShortRc(room: SessionSnapshot | null) {
   const code = liveCode(room);
   if (!code) return "";
-  return `rc ${code}`;
+  // Prefer /remote-sendell — bare "rc CODE" collides with Claude session resume skills
+  return `/remote-sendell ${code}`;
 }
 
 function buildInstallAgentPrompt(hub: string) {
@@ -231,7 +232,7 @@ export function LinkSessionDialog({
               <div>
                 <p className="text-sm font-medium text-fg">Show pairing code</p>
                 <p className="text-xs text-fg-muted">
-                  Then type <code className="text-primary">rc CODIGO</code> in Grok
+                  Then type <code className="text-primary">/remote-sendell CODIGO</code> in Grok
                 </p>
               </div>
             </button>
@@ -319,7 +320,7 @@ export function LinkSessionDialog({
               <p className="text-center text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
                 Type this in Grok (this room only)
               </p>
-              <AlwaysSelectBox text={rcLine} title="rc + code" monoLarge />
+              <AlwaysSelectBox text={rcLine} title="/remote-sendell + code" monoLarge />
               <p className="text-center text-[10px] text-fg-subtle break-all">
                 hub {hub} · not linked until terminal pairs
               </p>

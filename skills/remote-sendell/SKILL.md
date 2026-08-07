@@ -1,19 +1,39 @@
-# Skill: `rc` / `/remote-sendell` — low token + shared transcript
+# Skill: Sendell Remote — `/remote-sendell` · short `rs`
+
+## CRITICAL — do not confuse with Claude session resume
+
+| Message | Meaning |
+|---------|---------|
+| **`/remote-sendell 6X38DZ`** | Sendell phone pairing (ALWAYS this) |
+| **`rs 6X38DZ`** | Same — short form |
+| **`rc 6X38DZ`** | ALSO Sendell **if** `~/.sendell/config.json` exists. **NOT** Claude session load. |
+| Claude resume / other `rc` skills | Only if user says **Claude** / session resume, or no Sendell config |
+
+If the user pastes a 6-char code from the Sendell phone app ("Link console"), this is **pairing**, never "Load Claude session as JSON".
+
+---
+
+## When this skill wins
+
+User message is exactly or starts with:
+
+- `/remote-sendell <CODE>`
+- `rs <CODE>`
+- `rc <CODE>` (6–8 alphanumeric, Sendell pairing)
+
+Then: **pair + silent wait**. Do **not** open Claude resume skills.
+
+---
 
 ## Visible chat (strict)
 
 | Moment | Print |
 |--------|--------|
-| After pair OK | **`rc`** only |
+| After pair OK | **`rc`** only (one line) |
 | While waiting | **nothing** |
-| On phone prompt | Real work only |
+| Phone prompt | Real work |
+| Local keyboard while linked | Mirror with `reply --user "..."` then answer |
 | stop | **`rc off`** |
-
-## Token rules
-
-- Idle wait is **Node forever long-poll** (no LLM tokens).
-- Start **one** `wait` in background (default timeout=0 forever).
-- Do not narrate pair/wait/timeouts.
 
 ## Commands
 
@@ -21,21 +41,12 @@
 $cfg = Get-Content "$env:USERPROFILE\.sendell\config.json" | ConvertFrom-Json
 $sh = $cfg.scriptPath
 $hub = $cfg.hub
+# CODE from phone Link console only
 node $sh pair --code CODE --hub $hub --cwd (Get-Location)
+# stdout: rc
 node $sh wait --cwd (Get-Location)
+# forever; phone prompt → work → reply → wait again
+# local typing → node $sh reply --user "LOCAL" --text "ANSWER"
 ```
 
-### Phone prompt (`wait` returns JSON type=prompt)
-- Treat `text` as normal user message (already on phone).
-- Answer, then: `node $sh reply --cwd (Get-Location) --text "ANSWER_ONLY"`
-- Start `wait` again silently.
-
-### Local keyboard (you typed in Grok, not from wait)
-- Phone must see **both** sides. Mirror human first, then answer:
-```powershell
-node $sh reply --cwd (Get-Location) --user "EXACT_LOCAL_USER_TEXT" --text "ANSWER_ONLY"
-```
-- Or: `node $sh note-user --cwd (Get-Location) --text "LOCAL_TEXT"` then `reply --text "..."`
-- Do this for **every** local user turn while `/rc` is on.
-
-No API keys. Phone and keyboard share one transcript.
+No API keys. No invented codes. No Claude session JSON for these codes.
