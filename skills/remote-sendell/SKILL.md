@@ -1,38 +1,58 @@
-# Skill: `/remote-sendell`
+# Skill: `/remote-sendell` · short form `rc`
 
-**Command:** `/remote-sendell` only  
+## One-line activation (after one-time install)
 
-## UX contract (like Cloudy /rc)
-
-When remote is on:
-
-- **Do NOT** print or narrate: “waiting for phone”, “loop started”, “pair OK”, “timeout, retrying”, “reinicio wait”, etc.
-- **Do NOT** dump long status tables in the chat.
-- Run `pair` / `wait` / `reply` as **quiet tools**. Prefer background wait.
-- In the TUI, the only visible signal should feel like a small **`/rc`** (remote active). If you must say one line after pair: `rc on` — nothing more.
-- When a phone prompt arrives, treat `text` as a **normal user message** and do the work. Tag `[sendell-remote]` is metadata only — **same quality**.
-- After work, `reply` with the **answer only** (no “esperando siguiente mensaje”, no session ids).
-- Then silently `wait` again.
-
-## Loop
+User types **only**:
 
 ```text
-pair once → wait (silent) → work on text → reply (answer only) → wait → …
+rc ABC123
 ```
 
-From **current project cwd**; script path = Sendell install:
+or:
+
+```text
+/remote-sendell ABC123
+```
+
+Read hub + script from `%USERPROFILE%\.sendell\config.json` (or `~/.sendell/config.json`).  
+If missing, use script path from this repo: `scripts/sendell-remote.mjs`.
+
+---
+
+## UX: normal session + quiet remote (Cloudy-style)
+
+| Do | Don't |
+|----|--------|
+| After pair, **one line**: `rc on` | Narrate waiting / timeouts / "loop started" |
+| Treat phone `text` as if typed **in this terminal** | Dump pair tables or tool prose in chat |
+| Reply in TUI with real work; `reply` answer-only to phone | "Esperando siguiente mensaje", session ids |
+| Keep working on local keystrokes too | Use `sendell-bridge --demo` |
+
+Phone and keyboard are both normal user input. Remote is a second door into the **same** session.
+
+You cannot paint a green badge inside Grok’s chrome (product limit). Closest signal: short `rc on` and quiet tools.
+
+---
+
+## Loop (silent)
 
 ```powershell
-$sh = "C:\Users\Daniel\Desktop\Daniel\sendell-remote-control\forge-forge-sky-cabin\scripts\sendell-remote.mjs"
-node $sh pair --code CODE --hub http://192.168.1.8:8080 --cwd (Get-Location)
+$cfg = Get-Content "$env:USERPROFILE\.sendell\config.json" | ConvertFrom-Json
+$sh = $cfg.scriptPath
+$hub = $cfg.hub
+node $sh pair --code CODE --hub $hub --cwd (Get-Location)
 node $sh wait --cwd (Get-Location) --timeout 300000
-# on prompt JSON → do work
-node $sh reply --cwd (Get-Location) --text "answer only"
+# type=prompt → do work as normal user message
+node $sh reply --cwd (Get-Location) --text "ANSWER_ONLY"
+# wait again — do not narrate
 ```
 
-## Rules
+---
 
-- No API keys  
-- No `sendell-bridge --demo` for this mode  
-- `wait` timeout → silently wait again (exit 0)  
-- User says stop → stop loop, one word: `rc off`
+## One-time install (user or you run once)
+
+```powershell
+node path\to\sendell\scripts\install-remote-sendell.mjs --hub http://192.168.1.8:8080 --project (Get-Location)
+```
+
+Then every session is just: `rc CODIGO` from the phone’s pairing code.

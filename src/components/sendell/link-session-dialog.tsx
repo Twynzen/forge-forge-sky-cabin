@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils/cn";
 
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
 
-/** Clipboard works poorly on mobile HTTP (non-localhost); fall back to execCommand. */
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
     if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -53,25 +52,27 @@ function hubUrl() {
   return window.location.origin;
 }
 
-/** Prompt the user pastes into Grok — no separate command install. */
+/** Short activation — after one-time install of the skill */
+function buildShortRc(rawCode: string) {
+  const code = rawCode.replace(/-/g, "");
+  return `rc ${code}`;
+}
+
+/** Fallback long prompt if skill not installed yet */
 function buildGrokPrompt(rawCode: string, hub: string) {
   const code = rawCode.replace(/-/g, "");
-  return `/remote-sendell
+  return `rc ${code}
 
-code: ${code}
-hub: ${hub}
-script: C:\\\\Users\\\\Daniel\\\\Desktop\\\\Daniel\\\\sendell-remote-control\\\\forge-forge-sky-cabin\\\\scripts\\\\sendell-remote.mjs
+(If skill not installed yet, run once on PC:
+node C:\\Users\\Daniel\\Desktop\\Daniel\\sendell-remote-control\\forge-forge-sky-cabin\\scripts\\install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
+then only type: rc ${code})
 
-Quiet mode (like /rc):
-- Do NOT narrate waiting, pair, timeouts, or loops in chat.
-- Optional one line after pair: rc on
-- pair once, then wait loop:
-  node "<script>" pair --code ${code} --hub ${hub} --cwd (Get-Location)
-  node "<script>" wait --cwd (Get-Location) --timeout 300000
-- On JSON type=prompt: treat "text" as a normal user message (same quality).
-- reply --text with the answer ONLY (no "esperando…", no session ids).
-- Then silent wait again until I say stop (rc off).
-- No API keys. No sendell-bridge --demo.`;
+Quiet: after pair say only "rc on". Phone text = normal user message. reply answer-only. No narration of waits.
+$cfg = Get-Content "$env:USERPROFILE\\.sendell\\config.json" -ErrorAction SilentlyContinue | ConvertFrom-Json
+$sh = if ($cfg) { $cfg.scriptPath } else { "C:\\Users\\Daniel\\Desktop\\Daniel\\sendell-remote-control\\forge-forge-sky-cabin\\scripts\\sendell-remote.mjs" }
+$h = if ($cfg) { $cfg.hub } else { "${hub}" }
+node $sh pair --code ${code} --hub $h --cwd (Get-Location)
+node $sh wait --cwd (Get-Location) --timeout 300000`;
 }
 
 export function LinkSessionDialog({
@@ -98,7 +99,7 @@ export function LinkSessionDialog({
   const [providerId, setProviderId] = useState<ProviderId>("grok-build");
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<SessionSnapshot | null>(null);
-  const [copied, setCopied] = useState<"code" | "prompt" | null>(null);
+  const [copied, setCopied] = useState<"code" | "rc" | "prompt" | null>(null);
   const [copyFailed, setCopyFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -141,29 +142,12 @@ export function LinkSessionDialog({
     }
   };
 
-  const copyCode = async () => {
-    if (!room?.pairingCode) return;
-    const raw = room.pairingCode.replace(/-/g, "");
-    const ok = await copyToClipboard(raw);
-    if (ok) {
-      setCopied("code");
-      setCopyFailed(false);
-      setTimeout(() => setCopied(null), 2500);
-    } else {
-      setCopyFailed(true);
-      setCopied(null);
-      setTimeout(() => setCopyFailed(false), 3000);
-    }
-  };
-
-  const copyGrokPrompt = async () => {
-    if (!room?.pairingCode) return;
-    const text = buildGrokPrompt(room.pairingCode, hubUrl());
+  const doCopy = async (kind: "code" | "rc" | "prompt", text: string) => {
     const ok = await copyToClipboard(text);
     if (ok) {
-      setCopied("prompt");
+      setCopied(kind);
       setCopyFailed(false);
-      setTimeout(() => setCopied(null), 3000);
+      setTimeout(() => setCopied(null), 2500);
     } else {
       setCopyFailed(true);
       setCopied(null);
@@ -180,7 +164,8 @@ export function LinkSessionDialog({
             Link a console
           </DialogTitle>
           <DialogDescription>
-            No API key. Paste a short prompt into Grok — no extra install.
+            After one-time install: type{" "}
+            <code className="text-primary">rc CODIGO</code> in Grok. No long paste.
           </DialogDescription>
         </DialogHeader>
 
@@ -195,7 +180,7 @@ export function LinkSessionDialog({
               <div>
                 <p className="text-sm font-medium text-fg">Phone shows code</p>
                 <p className="text-xs text-fg-muted">
-                  Copy a ready-made Grok prompt with the code filled in
+                  Copy <code className="text-primary">rc CODIGO</code> for Grok
                 </p>
               </div>
             </button>
@@ -207,9 +192,7 @@ export function LinkSessionDialog({
               <Terminal className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
                 <p className="text-sm font-medium text-fg">Enter code from terminal</p>
-                <p className="text-xs text-fg-muted">
-                  If the agent printed a code first
-                </p>
+                <p className="text-xs text-fg-muted">Agent printed a code first</p>
               </div>
             </button>
             <button
@@ -220,7 +203,7 @@ export function LinkSessionDialog({
               <Cable className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
                 <p className="text-sm font-medium text-fg">Try demo</p>
-                <p className="text-xs text-fg-muted">UI only, no real machine</p>
+                <p className="text-xs text-fg-muted">UI only</p>
               </div>
             </button>
           </div>
@@ -265,22 +248,19 @@ export function LinkSessionDialog({
 
         {mode === "enter_code" && (
           <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-xs font-medium text-fg-muted">Pairing code</p>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                placeholder="ABC123"
-                className="font-mono tracking-widest"
-                autoCapitalize="characters"
-              />
-            </div>
+            <Input
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              placeholder="ABC123"
+              className="font-mono tracking-widest"
+              autoCapitalize="characters"
+            />
             {error && <p className="text-xs text-danger">{error}</p>}
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => setMode("choose")}>
                 Back
               </Button>
-              <Button className="flex-1" disabled={creating} onClick={() => void join()}>
+              <Button className="flex-1" onClick={() => void join()}>
                 Link
               </Button>
             </div>
@@ -291,67 +271,70 @@ export function LinkSessionDialog({
           <div className="space-y-4">
             <div className="rounded-2xl border border-primary/25 bg-primary/5 px-4 py-5 text-center">
               <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-                Pairing code
+                In Grok, type only
               </p>
-              <p className="mt-2 font-mono text-3xl font-semibold tracking-[0.25em] text-primary">
-                {room.pairingCode}
+              <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary">
+                {buildShortRc(room.pairingCode ?? "")}
               </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <p className="mt-1 text-[11px] text-fg-subtle">
+                code {room.pairingCode} · hub {hubUrl()}
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
                 <Button
                   size="sm"
-                  variant={copied === "code" ? "default" : "secondary"}
-                  onClick={() => void copyCode()}
+                  onClick={() =>
+                    void doCopy("rc", buildShortRc(room.pairingCode ?? ""))
+                  }
                 >
-                  {copied === "code" ? (
+                  {copied === "rc" ? (
                     <Check className="size-3.5" />
                   ) : (
                     <Copy className="size-3.5" />
                   )}
-                  {copied === "code" ? "Copied!" : "Copy code"}
+                  {copied === "rc" ? "Copied!" : "Copy  rc CODIGO"}
                 </Button>
                 <Button
                   size="sm"
-                  variant={copied === "prompt" ? "default" : "default"}
-                  className={copied === "prompt" ? "" : "bg-primary"}
-                  onClick={() => void copyGrokPrompt()}
+                  variant="secondary"
+                  onClick={() =>
+                    void doCopy(
+                      "prompt",
+                      buildGrokPrompt(room.pairingCode ?? "", hubUrl()),
+                    )
+                  }
                 >
                   {copied === "prompt" ? (
                     <Check className="size-3.5" />
                   ) : (
                     <Copy className="size-3.5" />
                   )}
-                  {copied === "prompt" ? "Prompt copied!" : "Copy prompt for Grok"}
+                  {copied === "prompt" ? "Copied!" : "Copy longer fallback prompt"}
                 </Button>
               </div>
               {copyFailed && (
                 <p className="mt-2 text-[11px] text-warning">
-                  Clipboard blocked — long-press the code or select the prompt below.
-                </p>
-              )}
-              {copied === "prompt" && (
-                <p className="mt-2 text-[11px] font-medium text-primary">
-                  Paste into Grok on the PC (same project folder you care about).
+                  Clipboard blocked — type manually:{" "}
+                  <span className="font-mono text-primary">
+                    {buildShortRc(room.pairingCode ?? "")}
+                  </span>
                 </p>
               )}
             </div>
 
-            <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted leading-relaxed space-y-2">
-              <p className="font-medium text-fg">How it works</p>
-              <ol className="list-decimal space-y-1 pl-4">
-                <li>
-                  Tap <strong className="text-fg">Copy prompt for Grok</strong>
-                </li>
-                <li>On the PC, open Grok in your project folder</li>
-                <li>Paste and send — no separate install</li>
-                <li>Phone shows <span className="text-primary">/rc</span> when linked</li>
-              </ol>
-              <pre className="mt-2 max-h-32 overflow-auto rounded-lg border border-border bg-bg p-2.5 font-mono text-[10px] text-fg-muted whitespace-pre-wrap">
-                {buildGrokPrompt(room.pairingCode ?? "", hubUrl())}
+            <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
+              <p className="font-medium text-fg">One-time on the PC (if not done)</p>
+              <pre className="overflow-x-auto rounded-lg border border-border bg-bg p-2 font-mono text-[10px] text-primary whitespace-pre-wrap">
+{`cd C:\\Users\\Daniel\\Desktop\\Daniel\\sendell-remote-control\\forge-forge-sky-cabin
+node scripts\\install-remote-sendell.mjs --hub ${hubUrl()} --project C:\\Users\\Daniel\\Desktop\\Daniel\\dystopia-rp`}
               </pre>
+              <p>
+                After that, every session is only{" "}
+                <code className="text-primary">rc CODIGO</code> — no WhatsApp paste.
+              </p>
             </div>
 
             <Button className="w-full" onClick={() => handleOpenChange(false)}>
-              Done — paste in Grok
+              Done
             </Button>
           </div>
         )}
