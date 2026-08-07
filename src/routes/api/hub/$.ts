@@ -11,6 +11,7 @@
  * POST /api/hub/permission
  * POST /api/hub/cancel
  * POST /api/hub/close
+ * POST /api/hub/rename
  */
 import { createFileRoute } from "@tanstack/react-router";
 import type {
@@ -100,6 +101,15 @@ export const Route = createFileRoute("/api/hub/$")({
             if (!sessionId) return err("sessionId required");
             await h.closeSession(sessionId);
             return json({ ok: true });
+          }
+          if (path === "rename") {
+            const { sessionId, title } = body as {
+              sessionId?: string;
+              title?: string;
+            };
+            if (!sessionId) return err("sessionId required");
+            if (!title?.trim()) return err("title required");
+            return json(h.renameSession(sessionId, title));
           }
           return err("not found", 404);
         } catch (e) {

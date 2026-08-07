@@ -93,3 +93,9 @@ export async function closeSessionFn(opts: {
 }): Promise<{ ok: true }> {
   return api("/api/hub/close", { method: "POST", json: opts.data });
 }
+
+export async function renameSessionFn(opts: {
+  data: { sessionId: string; title: string };
+}): Promise<SessionSnapshot> {
+  return api("/api/hub/rename", { method: "POST", json: opts.data });
+}

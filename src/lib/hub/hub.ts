@@ -451,6 +451,16 @@ class Hub {
     this.touch(s, { status: s.meta.linkState === "linked" ? "ready" : s.meta.status });
   }
 
+
+  renameSession(sessionId: string, title: string): SessionSnapshot {
+    const s = this.sessions.get(sessionId);
+    if (!s) throw new Error("Session not found");
+    const next = title.trim().slice(0, 80);
+    if (!next) throw new Error("Title required");
+    this.touch(s, { title: next });
+    return this.getSnapshot(sessionId)!;
+  }
+
   async closeSession(sessionId: string): Promise<void> {
     const s = this.sessions.get(sessionId);
     if (!s) return;

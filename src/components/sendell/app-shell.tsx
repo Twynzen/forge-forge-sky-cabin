@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   cancelSessionFn,
   closeSessionFn,
+  renameSessionFn,
   createLinkRoomFn,
   getSessionFn,
   joinWithCodeFn,
@@ -292,6 +293,20 @@ export function AppShell() {
     await refreshSnapshot(activeSessionId);
   };
 
+
+  const handleRename = async (id: string, title: string) => {
+    try {
+      const snap = (await renameSessionFn({
+        data: { sessionId: id, title },
+      })) as SessionSnapshot;
+      setSnapshot(snap);
+      await refreshSessions();
+      toast.success("Renamed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Rename failed");
+    }
+  };
+
   const handleClose = async (id: string) => {
     await closeSessionFn({ data: { sessionId: id } });
     removeSession(id);
@@ -313,6 +328,7 @@ export function AppShell() {
           onSelect={(id) => void selectSession(id)}
           onNew={() => setLinkOpen(true)}
           onClose={(id) => void handleClose(id)}
+          onRename={(id, title) => void handleRename(id, title)}
         />
       </div>
 
@@ -331,6 +347,7 @@ export function AppShell() {
               setLinkOpen(true);
             }}
             onClose={(id) => void handleClose(id)}
+            onRename={(id, title) => void handleRename(id, title)}
           />
         </SheetContent>
       </Sheet>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Link2, MoreVertical, Radio, Trash2 } from "lucide-react";
+import { BookOpen, Link2, MoreVertical, Pencil, Radio, Trash2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,13 +11,17 @@ import { StatusDot, statusLabel } from "./status-dot";
 function SessionMenu({
   session,
   onClose,
+  onRename,
   onDismiss,
 }: {
   session: SessionMeta;
   onClose?: (id: string) => void;
+  onRename?: (id: string, title: string) => void;
   onDismiss: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(session.title);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -34,35 +38,96 @@ function SessionMenu({
     };
   }, [onDismiss]);
 
+  const submitRename = () => {
+    const next = draft.trim();
+    if (next && next !== session.title) {
+      onRename?.(session.id, next);
+    }
+    onDismiss();
+  };
+
   return (
     <div
       ref={ref}
-      className="absolute right-1 top-8 z-30 min-w-[11rem] rounded-xl border border-border bg-bg-elevated py-1 shadow-soft"
+      className="absolute right-1 top-8 z-30 min-w-[13rem] rounded-xl border border-border bg-bg-elevated py-1 shadow-soft"
       role="menu"
     >
       <div className="border-b border-border px-3 py-2">
         <p className="truncate text-[11px] font-medium text-fg">{session.title}</p>
         <p className="mt-0.5 text-[10px] text-fg-subtle">{statusLabel(session.status)}</p>
         {session.cwd && (
-          <p className="mt-1 truncate font-mono text-[9px] text-fg-subtle" title={session.cwd}>
+          <p
+            className="mt-1 truncate font-mono text-[9px] text-fg-subtle"
+            title={session.cwd}
+          >
             {session.cwd}
           </p>
         )}
       </div>
-      {onClose && (
-        <button
-          type="button"
-          role="menuitem"
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-danger transition hover:bg-danger/10"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(session.id);
-            onDismiss();
-          }}
-        >
-          <Trash2 className="size-3.5" />
-          Remove from app
-        </button>
+
+      {renaming ? (
+        <div className="space-y-2 px-2 py-2" onClick={(e) => e.stopPropagation()}>
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitRename();
+            }}
+            maxLength={80}
+            className="w-full rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-fg outline-none focus:border-primary"
+            placeholder="Display name"
+          />
+          <div className="flex gap-1">
+            <button
+              type="button"
+              className="flex-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-fg"
+              onClick={submitRename}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-[11px] text-fg-muted hover:bg-bg-subtle"
+              onClick={() => setRenaming(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {onRename && (
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-fg transition hover:bg-bg-subtle"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDraft(session.title);
+                setRenaming(true);
+              }}
+            >
+              <Pencil className="size-3.5 text-fg-muted" />
+              Rename
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-danger transition hover:bg-danger/10"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(session.id);
+                onDismiss();
+              }}
+            >
+              <Trash2 className="size-3.5" />
+              Remove from app
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -75,6 +140,7 @@ export function SessionSidebar({
   onSelect,
   onNew,
   onClose,
+  onRename,
   className,
 }: {
   sessions: SessionMeta[];
@@ -83,6 +149,7 @@ export function SessionSidebar({
   onSelect: (id: string) => void;
   onNew: () => void;
   onClose?: (id: string) => void;
+  onRename?: (id: string, title: string) => void;
   className?: string;
 }) {
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -206,6 +273,7 @@ export function SessionSidebar({
                 <SessionMenu
                   session={s}
                   onClose={onClose}
+                  onRename={onRename}
                   onDismiss={() => setMenuId(null)}
                 />
               )}
