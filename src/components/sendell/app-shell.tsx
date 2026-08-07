@@ -50,10 +50,8 @@ export function AppShell() {
 
   const [linkOpen, setLinkOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  /** Pairing room not yet linked — polled until console pairs */
   const [pendingRoomId, setPendingRoomId] = useState<string | null>(null);
 
-  /** Only show truly linked consoles in the sidebar */
   const linkedSessions = useMemo(
     () => sessions.filter((s) => s.linkState === "linked"),
     [sessions],
@@ -113,7 +111,6 @@ export function AppShell() {
     setSessions,
   ]);
 
-  // Poll active + pending rooms
   useEffect(() => {
     if (!bootstrapped) return;
     const id = window.setInterval(async () => {
@@ -133,7 +130,7 @@ export function AppShell() {
           }
         }
       } catch {
-        /* ignore transient */
+        /* ignore */
       }
     }, POLL_MS);
     return () => window.clearInterval(id);
@@ -166,7 +163,6 @@ export function AppShell() {
           demo: false,
         },
       })) as SessionSnapshot;
-      // Do NOT select as active session until terminal pairs
       setPendingRoomId(snap.id);
       await refreshSessions();
       return snap;
@@ -206,7 +202,7 @@ export function AppShell() {
     }
   };
 
-  const handleSimulateDemo = async () => {
+  const handleSimulateDemo = async (): Promise<void> => {
     setCreating(true);
     try {
       const snap = (await createLinkRoomFn({
@@ -347,7 +343,7 @@ export function AppShell() {
         creating={creating}
         onCreateRoom={handleCreateRoom}
         onJoinCode={handleJoinCode}
-        onSimulateDemo={() => void handleSimulateDemo()}
+        onSimulateDemo={handleSimulateDemo}
         onAbandonRoom={(id) => void handleAbandonRoom(id)}
       />
     </div>
