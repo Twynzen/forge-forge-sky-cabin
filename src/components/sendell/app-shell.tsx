@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   cancelSessionFn,
@@ -50,6 +50,14 @@ export function AppShell() {
 
   const [linkOpen, setLinkOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  /** Pairing room not yet linked — polled until console pairs */
+  const [pendingRoomId, setPendingRoomId] = useState<string | null>(null);
+
+  /** Only show truly linked consoles in the sidebar */
+  const linkedSessions = useMemo(
+    () => sessions.filter((s) => s.linkState === "linked"),
+    [sessions],
+  );
 
   const refreshSessions = useCallback(async () => {
     const list = await listSessionsFn();
@@ -83,7 +91,8 @@ export function AppShell() {
         if (cancelled) return;
         setProviders(prov);
         setSessions(list);
-        const first = list[0]?.id ?? null;
+        const linked = list.filter((s) => s.linkState === "linked");
+        const first = linked[0]?.id ?? null;
         setActiveSessionId(first);
         if (first) await refreshSnapshot(first);
         setBootstrapped(true);
@@ -104,32 +113,38 @@ export function AppShell() {
     setSessions,
   ]);
 
+  // Poll active + pending rooms
   useEffect(() => {
-    if (!activeSessionId) return;
-    const snap = snapshots[activeSessionId];
-    const busy =
-      sending ||
-      !snap ||
-      snap.status === "thinking" ||
-      snap.status === "streaming" ||
-      snap.status === "awaiting_permission" ||
-      snap.status === "waiting_link" ||
-      snap.status === "connecting";
-
-    if (!busy && snap?.linkState !== "waiting") return;
-
-    const t = window.setInterval(() => {
-      void refreshSnapshot(activeSessionId);
-      void refreshSessions();
+    if (!bootstrapped) return;
+    const id = window.setInterval(async () => {
+      try {
+        await refreshSessions();
+        if (activeSessionId) await refreshSnapshot(activeSessionId);
+        if (pendingRoomId) {
+          const snap = (await getSessionFn({
+            data: { sessionId: pendingRoomId },
+          })) as SessionSnapshot | null;
+          if (snap?.linkState === "linked") {
+            setPendingRoomId(null);
+            setActiveSessionId(snap.id);
+            setSnapshot(snap);
+            setLinkOpen(false);
+            toast.success("Console linked · /rc");
+          }
+        }
+      } catch {
+        /* ignore transient */
+      }
     }, POLL_MS);
-
-    return () => window.clearInterval(t);
+    return () => window.clearInterval(id);
   }, [
     activeSessionId,
+    bootstrapped,
+    pendingRoomId,
     refreshSessions,
     refreshSnapshot,
-    sending,
-    snapshots,
+    setActiveSessionId,
+    setSnapshot,
   ]);
 
   const selectSession = async (id: string) => {
@@ -151,9 +166,9 @@ export function AppShell() {
           demo: false,
         },
       })) as SessionSnapshot;
-      setSnapshot(snap);
+      // Do NOT select as active session until terminal pairs
+      setPendingRoomId(snap.id);
       await refreshSessions();
-      setActiveSessionId(snap.id);
       return snap;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create room");
@@ -163,16 +178,25 @@ export function AppShell() {
     }
   };
 
+  const handleAbandonRoom = async (sessionId: string) => {
+    try {
+      await closeSessionFn({ data: { sessionId } });
+    } catch {
+      /* ignore */
+    }
+    if (pendingRoomId === sessionId) setPendingRoomId(null);
+    removeSession(sessionId);
+    await refreshSessions();
+  };
+
   const handleJoinCode = async (code: string): Promise<SessionSnapshot | null> => {
     setCreating(true);
     try {
       const snap = (await joinWithCodeFn({
         data: { code },
       })) as SessionSnapshot;
-      setSnapshot(snap);
+      setPendingRoomId(snap.id);
       await refreshSessions();
-      setActiveSessionId(snap.id);
-      toast.success("Listening for console");
       return snap;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Join failed");
@@ -195,6 +219,7 @@ export function AppShell() {
       setSnapshot(snap);
       await refreshSessions();
       setActiveSessionId(snap.id);
+      setLinkOpen(false);
       toast.success("Demo console linked");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Demo failed");
@@ -211,88 +236,64 @@ export function AppShell() {
         data: { sessionId: activeSessionId, text },
       });
       await refreshSnapshot(activeSessionId);
-      const pollUntilDone = async () => {
-        for (let i = 0; i < 120; i++) {
-          await new Promise((r) => setTimeout(r, POLL_MS));
-          const snap = await refreshSnapshot(activeSessionId);
-          if (
-            !snap ||
-            snap.status === "ready" ||
-            snap.status === "error" ||
-            snap.status === "closed" ||
-            snap.status === "disconnected"
-          ) {
-            break;
-          }
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, POLL_MS));
+        const snap = await refreshSnapshot(activeSessionId);
+        if (
+          !snap ||
+          snap.status === "ready" ||
+          snap.status === "error" ||
+          snap.status === "closed" ||
+          snap.status === "disconnected"
+        ) {
+          break;
         }
-        setSending(false);
-        await refreshSessions();
-      };
-      void pollUntilDone();
+      }
+      setSending(false);
+      await refreshSessions();
     } catch (err) {
       setSending(false);
       toast.error(err instanceof Error ? err.message : "Send failed");
     }
   };
 
-  const handlePermission = async (
-    tool: ToolCall,
-    decision: "allow" | "reject",
-  ) => {
-    if (!activeSessionId) return;
-    try {
-      await resolvePermissionFn({
-        data: {
-          sessionId: activeSessionId,
-          toolCallId: tool.id,
-          decision,
-        },
-      });
-      await refreshSnapshot(activeSessionId);
-      if (decision === "allow") {
-        setSending(true);
-        for (let i = 0; i < 80; i++) {
-          await new Promise((r) => setTimeout(r, POLL_MS));
-          const snap = await refreshSnapshot(activeSessionId);
-          if (
-            !snap ||
-            snap.status === "ready" ||
-            snap.status === "error" ||
-            snap.status === "awaiting_permission"
-          ) {
-            break;
-          }
-        }
-        setSending(false);
-        await refreshSessions();
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Permission failed");
-    }
-  };
-
   const handleCancel = async () => {
     if (!activeSessionId) return;
     await cancelSessionFn({ data: { sessionId: activeSessionId } });
-    setSending(false);
+    await refreshSnapshot(activeSessionId);
+  };
+
+  const handlePermission = async (
+    tool: ToolCall,
+    decision: "allow" | "allow_always" | "reject",
+  ) => {
+    if (!activeSessionId) return;
+    await resolvePermissionFn({
+      data: {
+        sessionId: activeSessionId,
+        toolCallId: tool.id,
+        decision,
+      },
+    });
     await refreshSnapshot(activeSessionId);
   };
 
   const handleClose = async (id: string) => {
     await closeSessionFn({ data: { sessionId: id } });
     removeSession(id);
+    if (activeSessionId === id) {
+      setActiveSessionId(null);
+    }
     await refreshSessions();
   };
 
-  const activeSnap = activeSessionId
-    ? snapshots[activeSessionId] ?? null
-    : null;
+  const activeSnap = activeSessionId ? snapshots[activeSessionId] ?? null : null;
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-bg text-fg">
-      <div className="hidden w-72 shrink-0 border-r border-border lg:block xl:w-80">
+    <div className="flex h-dvh overflow-hidden bg-bg">
+      <div className="hidden w-72 shrink-0 border-r border-border lg:block">
         <SessionSidebar
-          sessions={sessions}
+          sessions={linkedSessions}
           providers={providers}
           activeId={activeSessionId}
           onSelect={(id) => void selectSession(id)}
@@ -307,7 +308,7 @@ export function AppShell() {
             <SheetTitle>Sessions</SheetTitle>
           </SheetHeader>
           <SessionSidebar
-            sessions={sessions}
+            sessions={linkedSessions}
             providers={providers}
             activeId={activeSessionId}
             onSelect={(id) => void selectSession(id)}
@@ -346,7 +347,8 @@ export function AppShell() {
         creating={creating}
         onCreateRoom={handleCreateRoom}
         onJoinCode={handleJoinCode}
-        onSimulateDemo={() => handleSimulateDemo()}
+        onSimulateDemo={() => void handleSimulateDemo()}
+        onAbandonRoom={(id) => void handleAbandonRoom(id)}
       />
     </div>
   );

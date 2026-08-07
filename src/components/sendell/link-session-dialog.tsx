@@ -19,8 +19,11 @@ import { Input } from "@/components/ui/input";
 import type { ProviderId, ProviderInfo, SessionSnapshot } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
 
+/** Bump when pairing UX changes — user can verify they are not on cache */
+export const PAIRING_UI_VERSION = "pairing-ui-v4";
+
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
-type CopyKind = "rc" | "install" | "installAgent" | null;
+type CopyKind = "rc" | "installAgent" | "installShell" | null;
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -63,35 +66,41 @@ function buildShortRc(room: SessionSnapshot | null) {
   return `rc ${code}`;
 }
 
-/** Shell one-time install — generic paths */
-function buildInstallShell(hub: string) {
-  return `# One-time (any PC) — in a terminal, from YOUR Sendell clone:
-cd path/to/your/sendell-remote-control
-node ./scripts/install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
-# macOS/Linux: --project "$PWD"
-# Then in Grok only:  rc THE_CODE_FROM_PHONE
-`;
+/** Agent installs skill once — NO personal paths, NO pairing code */
+function buildInstallAgentPrompt(hub: string) {
+  return `[Sendell ${PAIRING_UI_VERSION}] Install remote-control skill ONCE (you run tools).
+
+Hub URL (this phone): ${hub}
+
+Steps:
+1) Find on THIS machine the folder that contains BOTH:
+   - scripts/install-remote-sendell.mjs
+   - scripts/sendell-remote.mjs
+   (Search the disk if needed. Do not use invented paths.)
+2) Run from that folder:
+   node ./scripts/install-remote-sendell.mjs --hub ${hub} --project <CURRENT_PROJECT_DIR>
+   Windows PowerShell: --project (Get-Location)
+   macOS/Linux: --project "$PWD"
+   <CURRENT_PROJECT_DIR> = the repo where the user is working now (not necessarily Sendell).
+3) Confirm config file exists:
+   Windows: %USERPROFILE%\\.sendell\\config.json
+   macOS/Linux: ~/.sendell/config.json
+   Print only: hub and scriptPath.
+4) Reply exactly: sendell install ok — next use: rc CODE
+
+Rules:
+- This install does NOT link a session.
+- Do NOT invent a pairing code.
+- Pairing codes only come from the phone "rc XXXXXX" after Link console.`;
 }
 
-/**
- * Prompt the agent runs itself (accessibility).
- * No personal paths — agent must discover Sendell clone on disk.
- */
-function buildInstallAgentPrompt(hub: string) {
-  return `Install Sendell remote-control skill ONCE on this machine (you run the commands).
-
-Hub for this phone app: ${hub}
-
-Do this:
-1) Find the Sendell Remote Control repo on this computer (folder that contains scripts/install-remote-sendell.mjs and scripts/sendell-remote.mjs). Search common locations if needed; ask me only if you cannot find it.
-2) From that repo, run (PowerShell example):
-   node .\\scripts\\install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
-   Use the CURRENT project directory as --project (where I am working now).
-   On macOS/Linux: node ./scripts/install-remote-sendell.mjs --hub ${hub} --project "$PWD"
-3) Confirm ~/.sendell/config.json (or %USERPROFILE%\\.sendell\\config.json) exists and print hub + scriptPath only.
-4) Say when done: "sendell install ok — next time use: rc CODE"
-
-Do not invent API keys. Do not use a sample pairing code. Pairing codes always come fresh from the phone Link console.`;
+function buildInstallShell(hub: string) {
+  return `# [${PAIRING_UI_VERSION}] One-time shell install — generic paths
+# cd into YOUR clone of Sendell (wherever it lives on this PC)
+cd path/to/your/sendell-remote-control
+node ./scripts/install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
+# Then in Grok: rc THE_CODE_FROM_THE_PHONE_UI (fresh each room)
+`;
 }
 
 export function LinkSessionDialog({
@@ -101,6 +110,7 @@ export function LinkSessionDialog({
   onCreateRoom,
   onJoinCode,
   onSimulateDemo,
+  onAbandonRoom,
   creating,
 }: {
   open: boolean;
@@ -112,6 +122,8 @@ export function LinkSessionDialog({
   }) => Promise<SessionSnapshot | null>;
   onJoinCode: (code: string) => Promise<SessionSnapshot | null>;
   onSimulateDemo: () => Promise<void>;
+  /** Close waiting room if user dismisses without a linked console */
+  onAbandonRoom?: (sessionId: string) => void;
   creating?: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
@@ -121,6 +133,7 @@ export function LinkSessionDialog({
   const [copied, setCopied] = useState<CopyKind>(null);
   const [copyFailed, setCopyFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastCopiedPreview, setLastCopiedPreview] = useState<string>("");
 
   const reset = () => {
     setMode("choose");
@@ -129,10 +142,17 @@ export function LinkSessionDialog({
     setError(null);
     setCopied(null);
     setCopyFailed(false);
+    setLastCopiedPreview("");
   };
 
   const handleOpenChange = (v: boolean) => {
-    if (!v) reset();
+    if (!v) {
+      // User closed dialog without link → drop waiting room so no ghost session
+      if (room?.id && room.linkState !== "linked") {
+        onAbandonRoom?.(room.id);
+      }
+      reset();
+    }
     onOpenChange(v);
   };
 
@@ -143,7 +163,7 @@ export function LinkSessionDialog({
       setRoom(snap);
       setMode("room_ready");
     } else {
-      setError("Could not create link room");
+      setError("Could not create pairing room");
     }
   };
 
@@ -167,7 +187,8 @@ export function LinkSessionDialog({
     if (ok) {
       setCopied(kind);
       setCopyFailed(false);
-      setTimeout(() => setCopied(null), 2500);
+      setLastCopiedPreview(text.slice(0, 80).replace(/\n/g, " "));
+      setTimeout(() => setCopied(null), 3000);
     } else {
       setCopyFailed(true);
       setCopied(null);
@@ -177,8 +198,8 @@ export function LinkSessionDialog({
 
   const hub = hubUrl();
   const rcLine = buildShortRc(room);
-  const installShell = buildInstallShell(hub);
   const installAgent = buildInstallAgentPrompt(hub);
+  const installShell = buildInstallShell(hub);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -189,7 +210,10 @@ export function LinkSessionDialog({
             Link a console
           </DialogTitle>
           <DialogDescription>
-            Fresh code per room. Optional: let the agent install the skill once.
+            No linked session until the terminal pairs.{" "}
+            <span className="font-mono text-[10px] text-fg-subtle">
+              {PAIRING_UI_VERSION}
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -204,7 +228,7 @@ export function LinkSessionDialog({
               <div>
                 <p className="text-sm font-medium text-fg">Phone shows code</p>
                 <p className="text-xs text-fg-muted">
-                  Then <code className="text-primary">rc CODIGO</code> in Grok
+                  Terminal runs <code className="text-primary">rc CODIGO</code>
                 </p>
               </div>
             </button>
@@ -227,7 +251,7 @@ export function LinkSessionDialog({
               <Cable className="mt-0.5 size-5 shrink-0 text-primary" />
               <div>
                 <p className="text-sm font-medium text-fg">Try demo</p>
-                <p className="text-xs text-fg-muted">UI only</p>
+                <p className="text-xs text-fg-muted">Simulated linked console</p>
               </div>
             </button>
           </div>
@@ -235,28 +259,25 @@ export function LinkSessionDialog({
 
         {mode === "phone_room" && (
           <div className="space-y-4">
-            <div>
-              <p className="mb-2 text-xs font-medium text-fg-muted">Provider</p>
-              <div className="flex flex-wrap gap-2">
-                {providers.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    disabled={!p.available}
-                    onClick={() => setProviderId(p.id)}
-                    className={cn(
-                      "rounded-full border px-3 py-1.5 text-xs transition",
-                      providerId === p.id
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-border text-fg-muted",
-                      !p.available && "opacity-40",
-                    )}
-                  >
-                    {p.name}
-                    {!p.available ? " · soon" : ""}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {providers.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  disabled={!p.available}
+                  onClick={() => setProviderId(p.id)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs transition",
+                    providerId === p.id
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border text-fg-muted",
+                    !p.available && "opacity-40",
+                  )}
+                >
+                  {p.name}
+                  {!p.available ? " · soon" : ""}
+                </button>
+              ))}
             </div>
             {error && <p className="text-xs text-danger">{error}</p>}
             <div className="flex gap-2">
@@ -264,7 +285,7 @@ export function LinkSessionDialog({
                 Back
               </Button>
               <Button className="flex-1" disabled={creating} onClick={() => void createRoom()}>
-                {creating ? "Creating…" : "Create room & show code"}
+                {creating ? "…" : "Show pairing code"}
               </Button>
             </div>
           </div>
@@ -295,28 +316,27 @@ export function LinkSessionDialog({
           <div className="space-y-4">
             <div className="rounded-2xl border border-primary/25 bg-primary/5 px-4 py-5 text-center">
               <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-                This room — paste in Grok
+                After install — in Grok type only
               </p>
               <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary">
                 {rcLine}
               </p>
               <p className="mt-1 text-[11px] text-fg-subtle break-all">hub {hub}</p>
+              <p className="mt-1 text-[10px] text-fg-subtle">
+                Waiting for terminal… this is not a linked session yet
+              </p>
               <Button
                 className="mt-3 w-full"
                 size="sm"
                 onClick={() => void doCopy("rc", rcLine)}
               >
                 {copied === "rc" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                {copied === "rc" ? "Copied!" : "Copy rc + code (this room)"}
+                {copied === "rc" ? "Copied rc!" : "1. Copy rc + code"}
               </Button>
             </div>
 
             <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
-              <p className="font-medium text-fg">First time on this PC?</p>
-              <p>
-                Let the agent install the skill for you (recommended), or run
-                shell commands yourself.
-              </p>
+              <p className="font-medium text-fg">First time? Install skill (once)</p>
               <Button
                 size="sm"
                 className="w-full"
@@ -328,39 +348,41 @@ export function LinkSessionDialog({
                   <Copy className="size-3.5" />
                 )}
                 {copied === "installAgent"
-                  ? "Copied — paste into Grok once"
-                  : "Copy install prompt for Grok (agent installs)"}
+                  ? "Copied agent install prompt"
+                  : "2. Copy INSTALL prompt for Grok"}
               </Button>
+              <p className="text-[10px] text-fg-subtle">
+                Must start with{" "}
+                <code className="text-primary">[{PAIRING_UI_VERSION}]</code> — if not,
+                you are on an old cached app.
+              </p>
               <Button
                 size="sm"
                 variant="secondary"
                 className="w-full"
-                onClick={() => void doCopy("install", installShell)}
+                onClick={() => void doCopy("installShell", installShell)}
               >
-                {copied === "install" ? (
+                {copied === "installShell" ? (
                   <Check className="size-3.5" />
                 ) : (
                   <Copy className="size-3.5" />
                 )}
-                {copied === "install"
-                  ? "Shell install copied"
-                  : "Copy shell install (manual terminal)"}
+                {copied === "installShell"
+                  ? "Copied shell commands"
+                  : "Or copy shell install (manual)"}
               </Button>
-              <p className="text-fg-subtle">
-                Install does <strong className="text-fg">not</strong> link a room.
-                After install, use the green <code className="text-primary">rc …</code>{" "}
-                above with a <em>fresh</em> code.
-              </p>
             </div>
 
-            {copyFailed && (
-              <p className="text-center text-[11px] text-warning">
-                Clipboard blocked — select text manually.
-              </p>
+            {(copied || copyFailed) && (
+              <div className="rounded-lg border border-border bg-bg p-2 text-[10px] font-mono text-fg-muted break-all">
+                {copyFailed
+                  ? "Clipboard blocked — long-press the text in the dialog."
+                  : `Clipboard preview: ${lastCopiedPreview}…`}
+              </div>
             )}
 
-            <Button className="w-full" onClick={() => handleOpenChange(false)}>
-              Done
+            <Button className="w-full" variant="secondary" onClick={() => handleOpenChange(false)}>
+              Close (cancel room if not linked)
             </Button>
           </div>
         )}
