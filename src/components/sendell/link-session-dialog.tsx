@@ -20,6 +20,7 @@ import type { ProviderId, ProviderInfo, SessionSnapshot } from "@/lib/hub/types"
 import { cn } from "@/lib/utils/cn";
 
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
+type CopyKind = "rc" | "install" | null;
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
@@ -52,27 +53,37 @@ function hubUrl() {
   return window.location.origin;
 }
 
-/** Short activation — after one-time install of the skill */
-function buildShortRc(rawCode: string) {
-  const code = rawCode.replace(/-/g, "");
+/** Only the live room code — never a hardcoded sample */
+function liveCode(room: SessionSnapshot | null): string {
+  return (room?.pairingCode ?? "").replace(/-/g, "");
+}
+
+function buildShortRc(room: SessionSnapshot | null) {
+  const code = liveCode(room);
+  if (!code) return "";
   return `rc ${code}`;
 }
 
-/** Fallback long prompt if skill not installed yet */
-function buildGrokPrompt(rawCode: string, hub: string) {
-  const code = rawCode.replace(/-/g, "");
-  return `rc ${code}
+/**
+ * One-time install — generic paths for ANY machine.
+ * No personal folders. User runs from their clone of Sendell; --project = current project.
+ */
+function buildInstallOnce(hub: string) {
+  return `# One-time setup (any PC) — run in a terminal, NOT inside Grok chat
+# 1) Open a shell in YOUR Sendell repo clone (wherever you put it)
+cd path/to/your/sendell-remote-control
 
-(If skill not installed yet, run once on PC:
-node C:\\Users\\Daniel\\Desktop\\Daniel\\sendell-remote-control\\forge-forge-sky-cabin\\scripts\\install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
-then only type: rc ${code})
+# 2) Install skill + save hub (uses the project folder you care about)
+#    Windows PowerShell:
+node .\\scripts\\install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
 
-Quiet: after pair say only "rc on". Phone text = normal user message. reply answer-only. No narration of waits.
-$cfg = Get-Content "$env:USERPROFILE\\.sendell\\config.json" -ErrorAction SilentlyContinue | ConvertFrom-Json
-$sh = if ($cfg) { $cfg.scriptPath } else { "C:\\Users\\Daniel\\Desktop\\Daniel\\sendell-remote-control\\forge-forge-sky-cabin\\scripts\\sendell-remote.mjs" }
-$h = if ($cfg) { $cfg.hub } else { "${hub}" }
-node $sh pair --code ${code} --hub $h --cwd (Get-Location)
-node $sh wait --cwd (Get-Location) --timeout 300000`;
+#    macOS / Linux (from the project you want to control, e.g. your app repo):
+#    node /path/to/sendell/scripts/install-remote-sendell.mjs --hub ${hub} --project "$PWD"
+
+# After this, every Grok session only needs:
+#   rc THE_CODE_FROM_THE_PHONE
+# (the code is new each time you Link console — never reuse an old sample code)
+`;
 }
 
 export function LinkSessionDialog({
@@ -99,7 +110,7 @@ export function LinkSessionDialog({
   const [providerId, setProviderId] = useState<ProviderId>("grok-build");
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<SessionSnapshot | null>(null);
-  const [copied, setCopied] = useState<"code" | "rc" | "prompt" | null>(null);
+  const [copied, setCopied] = useState<CopyKind>(null);
   const [copyFailed, setCopyFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -142,7 +153,8 @@ export function LinkSessionDialog({
     }
   };
 
-  const doCopy = async (kind: "code" | "rc" | "prompt", text: string) => {
+  const doCopy = async (kind: Exclude<CopyKind, null>, text: string) => {
+    if (!text.trim()) return;
     const ok = await copyToClipboard(text);
     if (ok) {
       setCopied(kind);
@@ -155,6 +167,9 @@ export function LinkSessionDialog({
     }
   };
 
+  const rcLine = buildShortRc(room);
+  const installText = buildInstallOnce(hubUrl());
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
@@ -164,8 +179,9 @@ export function LinkSessionDialog({
             Link a console
           </DialogTitle>
           <DialogDescription>
-            After one-time install: type{" "}
-            <code className="text-primary">rc CODIGO</code> in Grok. No long paste.
+            Each link creates a <strong className="text-fg">new</strong> code. In
+            Grok type only <code className="text-primary">rc CODIGO</code> for{" "}
+            <em>this</em> room.
           </DialogDescription>
         </DialogHeader>
 
@@ -180,7 +196,7 @@ export function LinkSessionDialog({
               <div>
                 <p className="text-sm font-medium text-fg">Phone shows code</p>
                 <p className="text-xs text-fg-muted">
-                  Copy <code className="text-primary">rc CODIGO</code> for Grok
+                  Copy <code className="text-primary">rc …</code> for this session
                 </p>
               </div>
             </button>
@@ -240,7 +256,7 @@ export function LinkSessionDialog({
                 Back
               </Button>
               <Button className="flex-1" disabled={creating} onClick={() => void createRoom()}>
-                {creating ? "Creating…" : "Show pairing code"}
+                {creating ? "Creating…" : "Create room & show code"}
               </Button>
             </div>
           </div>
@@ -251,7 +267,7 @@ export function LinkSessionDialog({
             <Input
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="ABC123"
+              placeholder="Code from terminal"
               className="font-mono tracking-widest"
               autoCapitalize="characters"
             />
@@ -267,69 +283,68 @@ export function LinkSessionDialog({
           </div>
         )}
 
-        {mode === "room_ready" && room && (
+        {mode === "room_ready" && room && liveCode(room) && (
           <div className="space-y-4">
+            {/* THIS session only */}
             <div className="rounded-2xl border border-primary/25 bg-primary/5 px-4 py-5 text-center">
               <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-                In Grok, type only
+                This room only — paste in Grok
               </p>
               <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary">
-                {buildShortRc(room.pairingCode ?? "")}
+                {rcLine}
               </p>
-              <p className="mt-1 text-[11px] text-fg-subtle">
-                code {room.pairingCode} · hub {hubUrl()}
+              <p className="mt-1 text-[11px] text-fg-subtle break-all">
+                hub {hubUrl()}
               </p>
-              <div className="mt-3 flex flex-col gap-2">
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    void doCopy("rc", buildShortRc(room.pairingCode ?? ""))
-                  }
-                >
-                  {copied === "rc" ? (
-                    <Check className="size-3.5" />
-                  ) : (
-                    <Copy className="size-3.5" />
-                  )}
-                  {copied === "rc" ? "Copied!" : "Copy  rc CODIGO"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    void doCopy(
-                      "prompt",
-                      buildGrokPrompt(room.pairingCode ?? "", hubUrl()),
-                    )
-                  }
-                >
-                  {copied === "prompt" ? (
-                    <Check className="size-3.5" />
-                  ) : (
-                    <Copy className="size-3.5" />
-                  )}
-                  {copied === "prompt" ? "Copied!" : "Copy longer fallback prompt"}
-                </Button>
-              </div>
+              <Button
+                className="mt-3 w-full sm:w-auto"
+                size="sm"
+                onClick={() => void doCopy("rc", rcLine)}
+              >
+                {copied === "rc" ? (
+                  <Check className="size-3.5" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+                {copied === "rc" ? "Copied!" : "Copy rc + code for this room"}
+              </Button>
               {copyFailed && (
                 <p className="mt-2 text-[11px] text-warning">
                   Clipboard blocked — type manually:{" "}
-                  <span className="font-mono text-primary">
-                    {buildShortRc(room.pairingCode ?? "")}
-                  </span>
+                  <span className="font-mono text-primary">{rcLine}</span>
                 </p>
               )}
             </div>
 
+            {/* One-time install — separate action, generic paths */}
             <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
-              <p className="font-medium text-fg">One-time on the PC (if not done)</p>
-              <pre className="overflow-x-auto rounded-lg border border-border bg-bg p-2 font-mono text-[10px] text-primary whitespace-pre-wrap">
-{`cd C:\\Users\\Daniel\\Desktop\\Daniel\\sendell-remote-control\\forge-forge-sky-cabin
-node scripts\\install-remote-sendell.mjs --hub ${hubUrl()} --project C:\\Users\\Daniel\\Desktop\\Daniel\\dystopia-rp`}
-              </pre>
+              <p className="font-medium text-fg">First time on this PC only</p>
               <p>
-                After that, every session is only{" "}
-                <code className="text-primary">rc CODIGO</code> — no WhatsApp paste.
+                Install once so Grok understands <code className="text-primary">rc</code>.
+                Paths are generic — use <em>your</em> Sendell clone and project folder.
+              </p>
+              <pre className="overflow-x-auto rounded-lg border border-border bg-bg p-2 font-mono text-[10px] text-fg-muted whitespace-pre-wrap">
+                {installText}
+              </pre>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="w-full"
+                onClick={() => void doCopy("install", installText)}
+              >
+                {copied === "install" ? (
+                  <Check className="size-3.5" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+                {copied === "install"
+                  ? "Install instructions copied!"
+                  : "Copy one-time install commands"}
+              </Button>
+              <p className="text-fg-subtle">
+                This button does <strong className="text-fg">not</strong> copy a
+                pairing code. Linking always uses the green{" "}
+                <code className="text-primary">rc …</code> above.
               </p>
             </div>
 
