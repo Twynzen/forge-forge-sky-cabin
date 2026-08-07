@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Cable,
   Copy,
   Check,
   Link2,
+  Share2,
   Smartphone,
   Terminal,
 } from "lucide-react";
@@ -17,39 +18,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { ProviderId, ProviderInfo, SessionSnapshot } from "@/lib/hub/types";
+import { tryCopyText, tryShareText } from "@/lib/utils/copy";
 import { cn } from "@/lib/utils/cn";
 
-/** Bump when pairing UX changes — user can verify they are not on cache */
-export const PAIRING_UI_VERSION = "pairing-ui-v4";
+/** User can verify they are not on a cached old bundle */
+export const PAIRING_UI_VERSION = "pairing-ui-v5";
 
 type Mode = "choose" | "phone_room" | "enter_code" | "room_ready";
-type CopyKind = "rc" | "installAgent" | "installShell" | null;
-
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
+type PayloadKind = "rc" | "installAgent" | "installShell";
 
 function hubUrl() {
   if (typeof window === "undefined") return "http://127.0.0.1:8080";
@@ -66,7 +42,6 @@ function buildShortRc(room: SessionSnapshot | null) {
   return `rc ${code}`;
 }
 
-/** Agent installs skill once — NO personal paths, NO pairing code */
 function buildInstallAgentPrompt(hub: string) {
   return `[Sendell ${PAIRING_UI_VERSION}] Install remote-control skill ONCE (you run tools).
 
@@ -103,6 +78,45 @@ node ./scripts/install-remote-sendell.mjs --hub ${hub} --project (Get-Location)
 `;
 }
 
+function SelectableText({
+  text,
+  label,
+}: {
+  text: string;
+  label: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+    try {
+      el.setSelectionRange(0, text.length);
+    } catch {
+      /* ignore */
+    }
+  }, [text]);
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-medium text-warning">
+        {label} — long-press → Copy (clipboard API blocked on HTTP)
+      </p>
+      <textarea
+        ref={ref}
+        readOnly
+        value={text}
+        rows={Math.min(12, Math.max(4, text.split("\n").length + 1))}
+        className="w-full resize-y rounded-lg border border-warning/40 bg-bg p-2.5 font-mono text-[11px] leading-relaxed text-fg"
+        onFocus={(e) => e.target.select()}
+        onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+      />
+    </div>
+  );
+}
+
 export function LinkSessionDialog({
   open,
   onOpenChange,
@@ -122,7 +136,6 @@ export function LinkSessionDialog({
   }) => Promise<SessionSnapshot | null>;
   onJoinCode: (code: string) => Promise<SessionSnapshot | null>;
   onSimulateDemo: () => Promise<void>;
-  /** Close waiting room if user dismisses without a linked console */
   onAbandonRoom?: (sessionId: string) => void;
   creating?: boolean;
 }) {
@@ -130,24 +143,24 @@ export function LinkSessionDialog({
   const [providerId, setProviderId] = useState<ProviderId>("grok-build");
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<SessionSnapshot | null>(null);
-  const [copied, setCopied] = useState<CopyKind>(null);
-  const [copyFailed, setCopyFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastCopiedPreview, setLastCopiedPreview] = useState<string>("");
+  const [status, setStatus] = useState<string | null>(null);
+  /** When auto-copy fails, show this text for manual long-press */
+  const [manual, setManual] = useState<{ kind: PayloadKind; text: string } | null>(
+    null,
+  );
 
   const reset = () => {
     setMode("choose");
     setRoom(null);
     setCode("");
     setError(null);
-    setCopied(null);
-    setCopyFailed(false);
-    setLastCopiedPreview("");
+    setStatus(null);
+    setManual(null);
   };
 
   const handleOpenChange = (v: boolean) => {
     if (!v) {
-      // User closed dialog without link → drop waiting room so no ghost session
       if (room?.id && room.linkState !== "linked") {
         onAbandonRoom?.(room.id);
       }
@@ -181,25 +194,60 @@ export function LinkSessionDialog({
     }
   };
 
-  const doCopy = async (kind: Exclude<CopyKind, null>, text: string) => {
-    if (!text.trim()) return;
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      setCopied(kind);
-      setCopyFailed(false);
-      setLastCopiedPreview(text.slice(0, 80).replace(/\n/g, " "));
-      setTimeout(() => setCopied(null), 3000);
-    } else {
-      setCopyFailed(true);
-      setCopied(null);
-      setTimeout(() => setCopyFailed(false), 3000);
+  const payloadFor = (kind: PayloadKind): string => {
+    const hub = hubUrl();
+    if (kind === "rc") return buildShortRc(room);
+    if (kind === "installAgent") return buildInstallAgentPrompt(hub);
+    return buildInstallShell(hub);
+  };
+
+  /** Copy; if it fails, open manual select. Never fake success. */
+  const handleCopy = async (kind: PayloadKind) => {
+    const text = payloadFor(kind);
+    if (!text) return;
+    setManual(null);
+    setStatus(null);
+
+    const result = await tryCopyText(text);
+    if (result.ok) {
+      setStatus(
+        kind === "rc"
+          ? `Copied rc (${result.method})`
+          : `Copied ${kind} (${result.method})`,
+      );
+      // Verify best-effort: still show manual if insecure context (many phones lie)
+      if (!window.isSecureContext) {
+        setManual({ kind, text });
+        setStatus(
+          "May not stick on HTTP — text selected below, long-press Copy",
+        );
+      }
+      return;
     }
+
+    setManual({ kind, text });
+    setStatus("Auto-copy failed — long-press the selected text below");
+  };
+
+  /** Share sheet (WhatsApp / Grok / etc.) — best path on phone */
+  const handleShare = async (kind: PayloadKind) => {
+    const text = payloadFor(kind);
+    if (!text) return;
+    setManual(null);
+    const shared = await tryShareText(
+      text,
+      kind === "rc" ? "Sendell rc" : "Sendell install",
+    );
+    if (shared) {
+      setStatus("Shared — pick Grok / WhatsApp / Notes");
+      return;
+    }
+    // Fall back to manual
+    await handleCopy(kind);
   };
 
   const hub = hubUrl();
   const rcLine = buildShortRc(room);
-  const installAgent = buildInstallAgentPrompt(hub);
-  const installShell = buildInstallShell(hub);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -228,7 +276,7 @@ export function LinkSessionDialog({
               <div>
                 <p className="text-sm font-medium text-fg">Phone shows code</p>
                 <p className="text-xs text-fg-muted">
-                  Terminal runs <code className="text-primary">rc CODIGO</code>
+                  Then <code className="text-primary">rc CODIGO</code> in Grok
                 </p>
               </div>
             </button>
@@ -316,72 +364,86 @@ export function LinkSessionDialog({
           <div className="space-y-4">
             <div className="rounded-2xl border border-primary/25 bg-primary/5 px-4 py-5 text-center">
               <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-                After install — in Grok type only
+                In Grok after install
               </p>
-              <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary">
+              <p className="mt-2 font-mono text-2xl font-semibold tracking-wide text-primary select-all">
                 {rcLine}
               </p>
               <p className="mt-1 text-[11px] text-fg-subtle break-all">hub {hub}</p>
               <p className="mt-1 text-[10px] text-fg-subtle">
-                Waiting for terminal… this is not a linked session yet
+                Not linked until the terminal pairs
               </p>
-              <Button
-                className="mt-3 w-full"
-                size="sm"
-                onClick={() => void doCopy("rc", rcLine)}
-              >
-                {copied === "rc" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                {copied === "rc" ? "Copied rc!" : "1. Copy rc + code"}
-              </Button>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button size="sm" onClick={() => void handleShare("rc")}>
+                  <Share2 className="size-3.5" />
+                  Share rc
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void handleCopy("rc")}
+                >
+                  <Copy className="size-3.5" />
+                  Copy rc
+                </Button>
+              </div>
             </div>
 
             <div className="rounded-xl border border-border bg-bg-subtle p-3 text-xs text-fg-muted space-y-2">
-              <p className="font-medium text-fg">First time? Install skill (once)</p>
-              <Button
-                size="sm"
-                className="w-full"
-                onClick={() => void doCopy("installAgent", installAgent)}
-              >
-                {copied === "installAgent" ? (
-                  <Check className="size-3.5" />
-                ) : (
+              <p className="font-medium text-fg">First time? Install skill once</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="sm" onClick={() => void handleShare("installAgent")}>
+                  <Share2 className="size-3.5" />
+                  Share install
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void handleCopy("installAgent")}
+                >
                   <Copy className="size-3.5" />
-                )}
-                {copied === "installAgent"
-                  ? "Copied agent install prompt"
-                  : "2. Copy INSTALL prompt for Grok"}
-              </Button>
+                  Copy install
+                </Button>
+              </div>
               <p className="text-[10px] text-fg-subtle">
-                Must start with{" "}
-                <code className="text-primary">[{PAIRING_UI_VERSION}]</code> — if not,
-                you are on an old cached app.
+                Install text must include{" "}
+                <code className="text-primary">{PAIRING_UI_VERSION}</code>
               </p>
               <Button
                 size="sm"
-                variant="secondary"
+                variant="ghost"
                 className="w-full"
-                onClick={() => void doCopy("installShell", installShell)}
+                onClick={() => void handleCopy("installShell")}
               >
-                {copied === "installShell" ? (
-                  <Check className="size-3.5" />
-                ) : (
-                  <Copy className="size-3.5" />
-                )}
-                {copied === "installShell"
-                  ? "Copied shell commands"
-                  : "Or copy shell install (manual)"}
+                Shell install (manual)
               </Button>
             </div>
 
-            {(copied || copyFailed) && (
-              <div className="rounded-lg border border-border bg-bg p-2 text-[10px] font-mono text-fg-muted break-all">
-                {copyFailed
-                  ? "Clipboard blocked — long-press the text in the dialog."
-                  : `Clipboard preview: ${lastCopiedPreview}…`}
-              </div>
+            {status && (
+              <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-primary">
+                <Check className="size-3.5" />
+                {status}
+              </p>
             )}
 
-            <Button className="w-full" variant="secondary" onClick={() => handleOpenChange(false)}>
+            {manual && (
+              <SelectableText
+                text={manual.text}
+                label={
+                  manual.kind === "rc"
+                    ? "rc command"
+                    : manual.kind === "installAgent"
+                      ? "Grok install prompt"
+                      : "Shell install"
+                }
+              />
+            )}
+
+            <Button
+              className="w-full"
+              variant="secondary"
+              onClick={() => handleOpenChange(false)}
+            >
               Close (cancel room if not linked)
             </Button>
           </div>
