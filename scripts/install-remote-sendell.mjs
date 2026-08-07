@@ -60,41 +60,34 @@ writeFileSync(join(homeSendell, "config.json"), JSON.stringify(config, null, 2))
 
 const scriptEsc = scriptPath.replace(/\\/g, "\\\\");
 
-const skillBody = `# remote-sendell (Sendell phone remote)
+const skillBody = `# remote-sendell — one answer both sides
 
-## CRITICAL
-\`/remote-sendell CODE\`, \`rs CODE\`, or \`rc CODE\` (6-char from Sendell app) =
-**pair to Sendell hub**. NEVER "Load Claude session as JSON". Claude resume is a different skill.
+CRITICAL: \`/remote-sendell CODE\` / \`rs CODE\` / \`rc CODE\` (Sendell phone) = pair. NOT Claude session JSON.
 
-## Visible
-- After pair: print only \`rc\`
-- Wait forever (one background shell). No narration.
-- Local keyboard: reply --user "LOCAL" --text "ANSWER"
-- stop: \`rc off\`
-
-## Commands
-Config: ~/.sendell/config.json
-- hub: ${hub}
-- script: ${scriptEsc}
-
+## ONE answer
+Use **say** so phone and TUI get the same text:
 \`\`\`powershell
 $cfg = Get-Content "$env:USERPROFILE\\.sendell\\config.json" | ConvertFrom-Json
 $sh = $cfg.scriptPath
 $hub = $cfg.hub
 node $sh pair --code CODE --hub $hub --cwd (Get-Location)
 node $sh wait --cwd (Get-Location)
+# after work:
+node $sh say --cwd (Get-Location) --text "FULL FINAL MARKDOWN ANSWER"
+# local typing:
+node $sh say --cwd (Get-Location) --user "LOCAL USER TEXT" --text "FULL ANSWER"
 \`\`\`
+Never paraphrase a second version with reply. say = stdout + phone identical.
+Hub: ${hub}
+Script: ${scriptEsc}
 `;`;
 
 writeFileSync(join(skillDir, "remote-sendell.md"), skillBody);
 
 // Project snippet
 const snippet = `
-## Sendell remote
-
-Prefer: \`/remote-sendell CODE\` or \`rs CODE\` (phone Link console).
-Also: \`rc CODE\` = Sendell pairing when ~/.sendell exists — **not** Claude session resume.
-Follow ~/.sendell/skills/remote-sendell.md. After pair print only \`rc\`. Forever wait.
+## Sendell remote — one answer
+\`/remote-sendell CODE\` or \`rs CODE\` to pair. While linked: answer with **say** only (phone = TUI identical). Not Claude resume.
 `.trim();
 
 writeFileSync(join(homeSendell, "AGENTS.snippet.md"), snippet + "\n");

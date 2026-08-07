@@ -321,6 +321,112 @@ async function cmdReply() {
   console.log("ok");
 }
 
+
+/**
+ * ONE answer for both TUI and phone — never paraphrase twice.
+ * Writes outbox, prints exact text to stdout, pushes same text to hub.
+ */
+async function cmdSay() {
+  const cwd = resolve(String(arg("cwd", process.cwd())));
+  const session = loadSession(cwd);
+  let text = arg("text", "");
+  const file = arg("file", "");
+  if (file && file !== true) {
+    text = readFileSync(String(file), "utf8");
+  }
+  text = String(text || "").trim();
+  if (!text) {
+    console.error('Usage: say --text "..." | --file path  [--user "local human"]');
+    process.exit(1);
+  }
+
+  const dir = sessionDir(cwd);
+  mkdirSync(dir, { recursive: true });
+  const outbox = join(dir, "outbox.md");
+  writeFileSync(outbox, text, "utf8");
+
+  // optional local human mirror
+  const userText = String(arg("user", "") || "").trim();
+  if (userText) {
+    await api(session.hub, "/api/bridge/events", {
+      method: "POST",
+      body: JSON.stringify({
+        token: session.sessionToken,
+        events: [
+          {
+            type: "message",
+            message: {
+              id: uid("msg"),
+              role: "user",
+              content: [{ type: "text", text: userText }],
+              createdAt: Date.now(),
+              meta: { source: "console" },
+            },
+          },
+        ],
+      }),
+    });
+  }
+
+  // push assistant (same bytes) to phone
+  const msgId = uid("msg");
+  const token = session.sessionToken;
+  const hub = session.hub;
+  await api(hub, "/api/bridge/events", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      events: [
+        { type: "status", status: "streaming" },
+        {
+          type: "message",
+          message: {
+            id: msgId,
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            createdAt: Date.now(),
+            streaming: true,
+          },
+        },
+      ],
+    }),
+  });
+  const parts = text.match(/[\s\S]{1,64}/g) || [text];
+  for (const part of parts) {
+    await api(hub, "/api/bridge/events", {
+      method: "POST",
+      body: JSON.stringify({
+        token,
+        events: [
+          { type: "chunk", messageId: msgId, chunk: part, role: "assistant" },
+        ],
+      }),
+    });
+  }
+  await api(hub, "/api/bridge/events", {
+    method: "POST",
+    body: JSON.stringify({
+      token,
+      events: [
+        {
+          type: "message_update",
+          message: {
+            id: msgId,
+            role: "assistant",
+            content: [{ type: "text", text }],
+            createdAt: Date.now(),
+            streaming: false,
+          },
+        },
+        { type: "status", status: "ready" },
+      ],
+    }),
+  });
+
+  // TUI: exact same body (agent must not invent a second version)
+  console.log(text);
+}
+
 function cmdStatus() {
   const cwd = resolve(String(arg("cwd", process.cwd())));
   try {
@@ -333,17 +439,20 @@ function cmdStatus() {
 }
 
 function help() {
-  console.log(`sendell-remote: pair | wait | reply | note-user | status
+  console.log(`sendell-remote: pair | wait | say | reply | note-user | status
   pair  --code X --hub URL [--cwd DIR]   → prints: rc
-  wait  [--timeout 0]                    → 0=forever (default), idle = no LLM
-  note-user --text "..."                 → mirror local human msg to phone
-  reply --text "..." [--user "..."]      → assistant (+ optional local user)
+  wait  [--timeout 0]                    → phone text on stdout (plain)
+  say   --text "..." | --file f          → ONE answer: TUI stdout + phone (identical)
+        [--user "local human text"]
+  reply --text "..." [--user "..."]      → phone only (prefer say)
+  note-user --text "..."                 → mirror local human to phone
 Env: SENDELL_HUB`);
 }
 
 const commands = {
   pair: cmdPair,
   wait: cmdWait,
+  say: cmdSay,
   reply: cmdReply,
   "note-user": cmdNoteUser,
   status: cmdStatus,
