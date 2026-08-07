@@ -3,30 +3,7 @@ import { Bot, Brain, User } from "lucide-react";
 import type { ChatMessage, ContentBlock, ToolCall } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
 import { ToolCallCard } from "./tool-call-card";
-
-function renderMarkdownLite(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return (
-        <strong key={i} className="font-semibold text-fg">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    if (part.startsWith("`") && part.endsWith("`")) {
-      return (
-        <code
-          key={i}
-          className="rounded bg-bg-muted px-1 py-0.5 font-mono text-[0.85em] text-primary"
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    return <span key={i}>{part}</span>;
-  });
-}
+import { MarkdownBody } from "./markdown-body";
 
 function PlanBlock({ steps }: { steps: { id: string; title: string; status: string }[] }) {
   return (
@@ -69,22 +46,19 @@ function ContentBlocks({
   blocks,
   onAllow,
   onReject,
+  tone = "default",
 }: {
   blocks: ContentBlock[];
   onAllow?: (tool: ToolCall) => void;
   onReject?: (tool: ToolCall) => void;
+  tone?: "default" | "onPrimary";
 }) {
   return (
     <div className="space-y-2.5">
       {blocks.map((b, i) => {
         if (b.type === "text") {
           return (
-            <div
-              key={i}
-              className="whitespace-pre-wrap text-sm leading-relaxed text-inherit"
-            >
-              {renderMarkdownLite(b.text)}
-            </div>
+            <MarkdownBody key={i} text={b.text} tone={tone} />
           );
         }
         if (b.type === "tool_call") {
@@ -230,6 +204,7 @@ export function MessageList({
                   blocks={m.content}
                   onAllow={onAllow}
                   onReject={onReject}
+                  tone={isUser ? "onPrimary" : "default"}
                 />
                 {m.streaming && (
                   <span

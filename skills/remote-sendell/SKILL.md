@@ -50,3 +50,7 @@ node $sh wait --cwd (Get-Location)
 ```
 
 No API keys. No invented codes. No Claude session JSON for these codes.
+
+
+## Phone → terminal
+`wait` prints the phone message as **plain stdout** (looks like a normal user message). Answer normally, then `reply --text "..."`.

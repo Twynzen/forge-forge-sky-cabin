@@ -161,7 +161,10 @@ async function cmdWait() {
               events: [{ type: "status", status: "thinking" }],
             }),
           });
-          console.log(
+          // Clean TUI: phone text looks like a normal user turn.
+          // JSON stays on stderr for machines; agents should use stdout text.
+          console.log(c.text);
+          console.error(
             JSON.stringify({
               type: "prompt",
               id: c.id,
