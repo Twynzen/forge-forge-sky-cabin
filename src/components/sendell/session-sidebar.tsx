@@ -1,4 +1,5 @@
-import { BookOpen, Link2, Radio, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BookOpen, Link2, MoreVertical, Radio, Trash2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -6,6 +7,66 @@ import type { ProviderInfo, SessionMeta } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
 import { ProviderBadge } from "./provider-badge";
 import { StatusDot, statusLabel } from "./status-dot";
+
+function SessionMenu({
+  session,
+  onClose,
+  onDismiss,
+}: {
+  session: SessionMeta;
+  onClose?: (id: string) => void;
+  onDismiss: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onDismiss();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onDismiss]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute right-1 top-8 z-30 min-w-[11rem] rounded-xl border border-border bg-bg-elevated py-1 shadow-soft"
+      role="menu"
+    >
+      <div className="border-b border-border px-3 py-2">
+        <p className="truncate text-[11px] font-medium text-fg">{session.title}</p>
+        <p className="mt-0.5 text-[10px] text-fg-subtle">{statusLabel(session.status)}</p>
+        {session.cwd && (
+          <p className="mt-1 truncate font-mono text-[9px] text-fg-subtle" title={session.cwd}>
+            {session.cwd}
+          </p>
+        )}
+      </div>
+      {onClose && (
+        <button
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-danger transition hover:bg-danger/10"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose(session.id);
+            onDismiss();
+          }}
+        >
+          <Trash2 className="size-3.5" />
+          Remove from app
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function SessionSidebar({
   sessions,
@@ -24,6 +85,8 @@ export function SessionSidebar({
   onClose?: (id: string) => void;
   className?: string;
 }) {
+  const [menuId, setMenuId] = useState<string | null>(null);
+
   return (
     <aside className={cn("flex h-full w-full flex-col bg-bg-elevated", className)}>
       <div className="safe-pt flex items-center gap-3 border-b border-border px-4 py-3.5">
@@ -101,7 +164,7 @@ export function SessionSidebar({
                 }
               }}
               className={cn(
-                "group flex w-full cursor-pointer items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition",
+                "group relative flex w-full cursor-pointer items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition",
                 activeId === s.id
                   ? "bg-bg-muted ring-1 ring-border-strong"
                   : "hover:bg-bg-subtle",
@@ -121,24 +184,30 @@ export function SessionSidebar({
                     {s.hostLabel}
                   </p>
                 )}
-                {s.linkState === "waiting" && s.pairingCode && (
-                  <p className="mt-1 font-mono text-[11px] text-primary">
-                    Code {s.pairingCode}
-                  </p>
-                )}
               </div>
-              {onClose && (
-                <button
-                  type="button"
-                  className="mt-0.5 rounded-md p-1.5 text-fg-subtle opacity-0 transition hover:bg-bg group-hover:opacity-100 hover:text-danger focus:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClose(s.id);
-                  }}
-                  aria-label="Close session"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
+              <button
+                type="button"
+                className={cn(
+                  "mt-0.5 rounded-md p-1.5 text-fg-subtle transition hover:bg-bg hover:text-fg",
+                  "opacity-100 sm:opacity-0 sm:group-hover:opacity-100",
+                  menuId === s.id && "opacity-100 bg-bg text-fg",
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuId((id) => (id === s.id ? null : s.id));
+                }}
+                aria-label="Session options"
+                aria-haspopup="menu"
+                aria-expanded={menuId === s.id}
+              >
+                <MoreVertical className="size-3.5" />
+              </button>
+              {menuId === s.id && (
+                <SessionMenu
+                  session={s}
+                  onClose={onClose}
+                  onDismiss={() => setMenuId(null)}
+                />
               )}
             </div>
           ))}
