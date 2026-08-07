@@ -1,0 +1,161 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-bg: #08080a;
+  --color-bg-elevated: #101014;
+  --color-bg-subtle: #16161c;
+  --color-bg-muted: #1c1c24;
+  --color-fg: #f2f2f4;
+  --color-fg-muted: #9b9ba8;
+  --color-fg-subtle: #6b6b78;
+  --color-border: #26262f;
+  --color-border-strong: #3a3a46;
+  --color-primary: #5eead4;
+  --color-primary-fg: #042f2e;
+  --color-primary-dim: #2dd4bf;
+  --color-danger: #f87171;
+  --color-danger-fg: #450a0a;
+  --color-warning: #fbbf24;
+  --color-success: #4ade80;
+  --color-info: #7dd3fc;
+  --color-thought: #a5b4fc;
+  --color-card: #121218;
+  --color-ring: #5eead4;
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+
+  --font-sans: "DM Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Instrument Sans", "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --shadow-soft: 0 8px 30px rgb(0 0 0 / 0.35);
+  --shadow-glow: 0 0 0 1px color-mix(in oklab, var(--color-primary) 25%, transparent),
+    0 0 24px color-mix(in oklab, var(--color-primary) 12%, transparent);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+    color: var(--color-fg);
+  }
+
+  /* Scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+@layer utilities {
+  .safe-pb {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .safe-pt {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+  .safe-px {
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-fg-subtle) 0%,
+      var(--color-fg) 50%,
+      var(--color-fg-subtle) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 2s linear infinite;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-pulse-dot,
+  .shimmer {
+    animation: none !important;
+  }
+}
