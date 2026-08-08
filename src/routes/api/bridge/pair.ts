@@ -14,8 +14,9 @@ export const Route = createFileRoute("/api/bridge/pair")({
           if (!body?.code) {
             return Response.json({ error: "code required" }, { status: 400 });
           }
-          const { getHub } = await import("@/lib/hub/hub");
-          const result = getHub().pairBridge({
+          const { getHubReady } = await import("@/lib/hub/hub");
+          const h = await getHubReady();
+          const result = h.pairBridge({
             code: String(body.code),
             providerId: (body.providerId || "grok-build") as ProviderId,
             hostname: body.hostname || "unknown-host",

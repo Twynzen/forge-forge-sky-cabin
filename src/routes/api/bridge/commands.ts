@@ -18,8 +18,9 @@ export const Route = createFileRoute("/api/bridge/commands")({
             Number(url.searchParams.get("timeout") || 25000),
             55000,
           );
-          const { getHub } = await import("@/lib/hub/hub");
-          const commands = await getHub().bridgePollCommands(token, timeout);
+          const { getHubReady } = await import("@/lib/hub/hub");
+          const h = await getHubReady();
+          const commands = await h.bridgePollCommands(token, timeout);
           return Response.json({ commands });
         } catch (err) {
           return Response.json(

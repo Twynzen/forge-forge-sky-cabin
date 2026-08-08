@@ -17,8 +17,9 @@ export const Route = createFileRoute("/api/bridge/events")({
           if (!body?.token) {
             return Response.json({ error: "token required" }, { status: 400 });
           }
-          const { getHub } = await import("@/lib/hub/hub");
-          getHub().applyBridgeEvents(body.token, body.events || []);
+          const { getHubReady } = await import("@/lib/hub/hub");
+          const h = await getHubReady();
+          h.applyBridgeEvents(body.token, body.events || []);
           return Response.json({ ok: true });
         } catch (err) {
           return Response.json(
