@@ -7,6 +7,11 @@ import { MessageList } from "./message-list";
 import { ProviderBadge } from "./provider-badge";
 import { StatusDot, statusLabel } from "./status-dot";
 import { ToolCallCard } from "./tool-call-card";
+import {
+  WorkingBar,
+  WorkingChip,
+  isWorkingStatus,
+} from "./working-indicator";
 
 export function ChatPanel({
   snapshot,
@@ -67,6 +72,7 @@ export function ChatPanel({
     snapshot.status === "thinking" ||
     snapshot.status === "streaming" ||
     snapshot.status === "awaiting_permission";
+  const working = isWorkingStatus(snapshot.status, sending);
 
   const projectName =
     snapshot.cwd?.split(/[/\\]/).filter(Boolean).pop() ||
@@ -104,6 +110,7 @@ export function ChatPanel({
                 /rc
               </span>
             )}
+            <WorkingChip active={working} status={snapshot.status} sending={sending} />
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-4">
             <ProviderBadge providerId={snapshot.providerId} demo={snapshot.demo} />
@@ -116,6 +123,7 @@ export function ChatPanel({
           </div>
         </div>
       </header>
+      <WorkingBar active={working} status={snapshot.status} sending={sending} />
 
       {waiting && (
         <div className="border-b border-warning/30 bg-warning/10 px-4 py-3 text-center">
@@ -148,6 +156,9 @@ export function ChatPanel({
           messages={snapshot.messages}
           onAllow={onAllow}
           onReject={onReject}
+          working={working && !pending}
+          workingStatus={snapshot.status}
+          sending={sending}
         />
       </div>
 

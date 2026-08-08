@@ -4,6 +4,8 @@ import type { ChatMessage, ContentBlock, ToolCall } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
 import { ToolCallCard } from "./tool-call-card";
 import { MarkdownBody } from "./markdown-body";
+import { TypingBubble } from "./working-indicator";
+import type { SessionStatus } from "@/lib/hub/types";
 
 function PlanBlock({ steps }: { steps: { id: string; title: string; status: string }[] }) {
   return (
@@ -93,10 +95,16 @@ export function MessageList({
   messages,
   onAllow,
   onReject,
+  working,
+  workingStatus,
+  sending,
 }: {
   messages: ChatMessage[];
   onAllow?: (tool: ToolCall) => void;
   onReject?: (tool: ToolCall) => void;
+  working?: boolean;
+  workingStatus?: SessionStatus;
+  sending?: boolean;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -218,6 +226,11 @@ export function MessageList({
             </div>
           );
         })}
+        <TypingBubble
+          active={Boolean(working)}
+          status={workingStatus}
+          sending={sending}
+        />
         <div ref={bottomRef} className="h-px shrink-0" />
       </div>
     </div>
