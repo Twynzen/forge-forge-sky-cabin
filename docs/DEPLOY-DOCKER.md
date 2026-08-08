@@ -6,7 +6,7 @@ One always-on **Node hub** + **Postgres**. Fits long-poll remote control
 ```text
 Phone  ──HTTPS──►  VPS :8080 (Docker app)
                       │
-                      ├── Postgres (sessions schema)
+                      ├── Postgres (sessions + messages durable)
                       │
 Your PC (Grok) ──/remote-sendell──►  same VPS URL
 ```
@@ -87,6 +87,8 @@ In Grok:
 /remote-sendell CODIGO
 ```
 
+Use the **same hub URL** for every project on that PC.
+
 ---
 
 ## 5) HTTPS (recommended)
@@ -118,6 +120,16 @@ docker compose up -d --build
 ```
 
 Postgres volume `sendell_pg` **keeps data** across rebuilds.
+
+### What survives a hub restart
+
+| Survives | Needs re-pair |
+|----------|----------------|
+| Session titles, rename | Live `/rc` link |
+| Chat transcript in the app | Heartbeat / wait loop |
+| List of past sessions | Grok process itself |
+
+After `docker compose up -d --build`, sessions show as **offline** until you run `/remote-sendell CODIGO` again on that project.
 
 ---
 
@@ -153,12 +165,6 @@ docker compose up -d --build
 | `Dockerfile` + `docker-compose.yml` | yes |
 | `.env.example` (no secrets) | yes |
 | Migrations on start | yes |
-| Schema for durable sessions | `0002_sendell_hub.sql` (wire hub next) |
-| Live Grok still on user machines | yes (subscription stays on PC) |
-
----
-
-## Next engineering step
-
-Persist hub `Map` → `sendell_sessions` / `sendell_messages` so restarts keep history.  
-Live link still needs Grok + heartbeat; DB holds titles, transcripts, offline state.
+| Schema `sendell_sessions` / `sendell_messages` | yes |
+| Hub persists titles + transcripts | yes |
+| Live Grok on user machines | yes (subscription stays on PC) |

@@ -35,8 +35,8 @@ export const Route = createFileRoute("/api/hub/$")({
     handlers: {
       GET: async ({ params, request }) => {
         try {
-          const { getHub } = await import("@/lib/hub/hub");
-          const h = getHub();
+          const { getHubReady } = await import("@/lib/hub/hub");
+          const h = await getHubReady();
           const path = params._splat || "";
           const url = new URL(request.url);
 
@@ -60,8 +60,8 @@ export const Route = createFileRoute("/api/hub/$")({
       },
       POST: async ({ params, request }) => {
         try {
-          const { getHub } = await import("@/lib/hub/hub");
-          const h = getHub();
+          const { getHubReady } = await import("@/lib/hub/hub");
+          const h = await getHubReady();
           const path = params._splat || "";
           const body = await request.json().catch(() => ({}));
 
@@ -81,7 +81,6 @@ export const Route = createFileRoute("/api/hub/$")({
           }
           if (path === "prompt") {
             const data = body as SendPromptInput;
-            // fire-and-forget style for streaming updates via poll
             void h.sendPrompt(data).catch((e) => console.error("[hub] prompt", e));
             return json({ ok: true, started: true });
           }
