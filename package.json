@@ -14,7 +14,11 @@
     "preview": "vite preview --host 0.0.0.0 --port 8080",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "build:docker": "vite build",
+    "start": "node .output/server/index.mjs",
+    "docker:up": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f app"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.3",
@@ -89,5 +93,5 @@
     "typescript-eslint": "^8.56.1",
     "vite": "^8.1.0"
   },
-  "description": "Sendell Remote Control — multi-provider remote control for AI agents"
+  "description": "Sendell Remote Control \u2014 multi-provider remote control for AI agents"
 }

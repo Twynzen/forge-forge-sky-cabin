@@ -66,3 +66,24 @@ The phone UI still never stores that key.
 ## Stack
 
 TanStack Start · React 19 · Zustand · ACP-ready bridge · PWA
+
+---
+
+## Docker / VPS (self-host)
+
+Run a **single always-on Node hub + Postgres** (best for remote long-poll):
+
+```bash
+cp .env.example .env   # set POSTGRES_PASSWORD + SENDELL_PUBLIC_URL
+docker compose up -d --build
+```
+
+Full guide: [docs/DEPLOY-DOCKER.md](./docs/DEPLOY-DOCKER.md)
+
+On your agent machine, point the skill at the public URL:
+
+```bash
+node scripts/install-remote-sendell.mjs --hub https://your-vps-or-domain --project /path/to/project
+```
+
+Then in Grok: `/remote-sendell CODIGO`

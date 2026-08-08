@@ -86,3 +86,4 @@ Kept for future automation:
 4. Optional API-key automation mode in UI (advanced)  
 5. SSE/WebSocket push  
 6. Session persistence + multi-user  
+7. **Docker / VPS self-host** — see [DEPLOY-DOCKER.md](./DEPLOY-DOCKER.md)  
