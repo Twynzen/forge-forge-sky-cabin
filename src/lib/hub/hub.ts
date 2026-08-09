@@ -242,19 +242,14 @@ class Hub {
     const toRemove: string[] = [];
     for (const s of this.sessions.values()) {
       this.applyLiveness(s);
-      if (
-        s.meta.linkState === "disconnected" &&
-        s.offlineSince &&
-        Date.now() - s.offlineSince > AUTO_REMOVE_MS
-      ) {
-        // Keep in DB for history — only drop from live map after long offline
-        // User can still "Remove from app". Auto-remove cleans ghosts.
-        toRemove.push(s.meta.id);
-      }
+      // NEVER auto-delete linked/disconnected sessions — they live in Postgres
+      // until the user taps "Remove from app". (Old 5-min purge wiped history.)
       if (
         s.meta.linkState === "waiting" &&
+        s.messages.length === 0 &&
         Date.now() - s.meta.createdAt > 15 * 60_000
       ) {
+        // Only empty unpaired rooms expire
         toRemove.push(s.meta.id);
       }
     }
