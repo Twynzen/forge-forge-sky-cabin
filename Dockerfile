@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-# Prefer clean install; fall back if lock ever drifts
-RUN npm ci || npm install
+# Exact versions from committed package-lock.json only (no floating resolve)
+RUN npm ci
 
 COPY . .
 
