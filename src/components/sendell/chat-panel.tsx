@@ -1,6 +1,6 @@
 import { Link2, Menu, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { SessionSnapshot, ToolCall } from "@/lib/hub/types";
+import type { PromptImageInput, SessionSnapshot, ToolCall } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
 import { Composer } from "./composer";
 import { MessageList } from "./message-list";
@@ -26,7 +26,7 @@ export function ChatPanel({
   snapshot: SessionSnapshot | null;
   sending?: boolean;
   onMenu?: () => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, images?: PromptImageInput[]) => void;
   onCancel?: () => void;
   onAllow: (tool: ToolCall) => void;
   onReject: (tool: ToolCall) => void;

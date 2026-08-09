@@ -40,10 +40,12 @@ services:
       HOST: 0.0.0.0
       PORT: 8080
       DATABASE_URL: postgres://${POSTGRES_USER:-sendell}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sendell}
-      # Public URL the phone + bridge use (set in .env for production)
       SENDELL_PUBLIC_URL: ${SENDELL_PUBLIC_URL:-}
+      SENDELL_MEDIA_DIR: /data/media
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       BETTER_AUTH_URL: ${SENDELL_PUBLIC_URL:-http://localhost:8080}
+    volumes:
+      - sendell_media:/data/media
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/"]
       interval: 30s
@@ -53,3 +55,4 @@ services:
 
 volumes:
   sendell_pg:
+  sendell_media:

@@ -13,6 +13,7 @@ import {
   startPromptFn,
 } from "@/lib/api/hub-api";
 import type {
+  PromptImageInput,
   ProviderId,
   SessionSnapshot,
   ToolCall,
@@ -242,12 +243,13 @@ export function AppShell() {
     }
   };
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, images?: PromptImageInput[]) => {
     if (!activeSessionId) return;
+    if (!text.trim() && !(images && images.length)) return;
     setSending(true);
     try {
       await startPromptFn({
-        data: { sessionId: activeSessionId, text },
+        data: { sessionId: activeSessionId, text, images },
       });
       await refreshSnapshot(activeSessionId);
       for (let i = 0; i < 120; i++) {
@@ -363,7 +365,7 @@ export function AppShell() {
             sending={sending}
             onMenu={() => setSidebarOpen(true)}
             onLink={() => setLinkOpen(true)}
-            onSend={(t) => void handleSend(t)}
+            onSend={(t, imgs) => void handleSend(t, imgs)}
             onCancel={() => void handleCancel()}
             onAllow={(tool) => void handlePermission(tool, "allow")}
             onReject={(tool) => void handlePermission(tool, "reject")}

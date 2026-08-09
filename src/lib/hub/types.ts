@@ -35,7 +35,24 @@ export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "code"; language?: string; code: string }
   | { type: "tool_call"; toolCall: ToolCall }
-  | { type: "plan"; steps: PlanStep[] };
+  | { type: "plan"; steps: PlanStep[] }
+  | {
+      type: "image";
+      /** Server media id */
+      mediaId: string;
+      mimeType: string;
+      name?: string;
+      /** App-relative URL e.g. /api/hub/media/xxx */
+      url: string;
+    };
+
+export interface PromptImageInput {
+  /** base64 (raw or data-url) — preferred for phone upload */
+  base64?: string;
+  mediaId?: string;
+  mimeType: string;
+  name?: string;
+}
 
 export interface PlanStep {
   id: string;
@@ -146,6 +163,8 @@ export interface JoinWithCodeInput {
 export interface SendPromptInput {
   sessionId: string;
   text: string;
+  /** Optional images from phone (max 3, each ≤2.5MB) */
+  images?: PromptImageInput[];
 }
 
 export interface PermissionDecisionInput {
@@ -174,7 +193,19 @@ export interface BridgePairResult {
 
 /** Commands the phone → hub queues for the bridge */
 export type BridgeCommand =
-  | { id: string; type: "prompt"; text: string; createdAt: number }
+  | {
+      id: string;
+      type: "prompt";
+      text: string;
+      createdAt: number;
+      /** Absolute URLs the bridge can download onto the agent machine */
+      images?: Array<{
+        mediaId: string;
+        url: string;
+        mimeType: string;
+        name?: string;
+      }>;
+    }
   | {
       id: string;
       type: "permission";

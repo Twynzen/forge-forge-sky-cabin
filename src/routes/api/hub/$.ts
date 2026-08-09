@@ -1,17 +1,8 @@
 /**
  * REST hub API — phone client uses fetch (no createServerFn IDs).
- * Avoids TanStack "Invalid server function ID" on Windows/Vite cache skew.
  *
- * GET  /api/hub/providers
- * GET  /api/hub/sessions
- * GET  /api/hub/session?id=
- * POST /api/hub/room
- * POST /api/hub/join
- * POST /api/hub/prompt
- * POST /api/hub/permission
- * POST /api/hub/cancel
- * POST /api/hub/close
- * POST /api/hub/rename
+ * GET  /api/hub/providers | sessions | session?id= | media/:id
+ * POST /api/hub/room | join | prompt | permission | cancel | close | rename | upload
  */
 import { createFileRoute } from "@tanstack/react-router";
 import type {
@@ -35,9 +26,25 @@ export const Route = createFileRoute("/api/hub/$")({
     handlers: {
       GET: async ({ params, request }) => {
         try {
+          const path = params._splat || "";
+
+          if (path.startsWith("media/")) {
+            const id = path.slice("media/".length).split("/")[0];
+            const { getMedia } = await import("@/lib/hub/media-store");
+            const media = getMedia(id);
+            if (!media) return err("not found", 404);
+            return new Response(new Uint8Array(media.buf), {
+              status: 200,
+              headers: {
+                "content-type": media.mimeType,
+                "cache-control": "public, max-age=86400",
+                "content-disposition": `inline; filename="${media.name}"`,
+              },
+            });
+          }
+
           const { getHubReady } = await import("@/lib/hub/hub");
           const h = await getHubReady();
-          const path = params._splat || "";
           const url = new URL(request.url);
 
           if (path === "providers") {
@@ -79,10 +86,38 @@ export const Route = createFileRoute("/api/hub/$")({
             if (!data?.code) return err("code required");
             return json(h.joinWithCode(data.code));
           }
+          if (path === "upload") {
+            const { saveMediaBase64, mediaPublicPath } = await import(
+              "@/lib/hub/media-store"
+            );
+            const { base64, mimeType, name } = body as {
+              base64?: string;
+              mimeType?: string;
+              name?: string;
+            };
+            if (!base64) return err("base64 required");
+            const stored = saveMediaBase64({
+              base64,
+              mimeType: mimeType || "image/jpeg",
+              name,
+            });
+            return json({
+              mediaId: stored.id,
+              mimeType: stored.mimeType,
+              name: stored.name,
+              url: mediaPublicPath(stored.id),
+              size: stored.size,
+            });
+          }
           if (path === "prompt") {
             const data = body as SendPromptInput;
-            void h.sendPrompt(data).catch((e) => console.error("[hub] prompt", e));
-            return json({ ok: true, started: true });
+            // await so phone sees errors (offline, etc.)
+            try {
+              await h.sendPrompt(data);
+              return json({ ok: true, started: true });
+            } catch (e) {
+              return err(e, 400);
+            }
           }
           if (path === "permission") {
             const data = body as PermissionDecisionInput;

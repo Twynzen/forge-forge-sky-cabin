@@ -67,3 +67,8 @@ node $sh wait --cwd (Get-Location)
 | stop | `rc off` |
 
 No API keys. No double answers.
+
+## Images
+
+- Phone to you: `wait` downloads into `.sendell/inbox/` and prints local paths.
+- You to phone: `node $sh say --cwd (Get-Location) --text "..." --image path\to.png`

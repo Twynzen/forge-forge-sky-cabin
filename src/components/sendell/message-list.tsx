@@ -63,6 +63,29 @@ function ContentBlocks({
             <MarkdownBody key={i} text={b.text} tone={tone} />
           );
         }
+        if (b.type === "image") {
+          return (
+            <a
+              key={i}
+              href={b.url}
+              target="_blank"
+              rel="noreferrer"
+              className="block overflow-hidden rounded-xl border border-border/60"
+            >
+              <img
+                src={b.url}
+                alt={b.name || "image"}
+                className="max-h-72 w-full object-contain bg-bg-muted/40"
+                loading="lazy"
+              />
+              {b.name && (
+                <p className="truncate px-2 py-1 text-[10px] text-fg-subtle">
+                  {b.name}
+                </p>
+              )}
+            </a>
+          );
+        }
         if (b.type === "tool_call") {
           return (
             <ToolCallCard

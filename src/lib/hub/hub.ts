@@ -46,6 +46,11 @@ import type {
   ToolCall,
 } from "./types";
 import { runDemoConsoleAgent } from "./demo-console";
+import {
+  mediaPublicPath,
+  publicHubBase,
+  saveMediaBase64,
+} from "./media-store";
 
 const STALE_MS = 45_000;
 const AUTO_REMOVE_MS = 5 * 60_000;
@@ -448,10 +453,52 @@ class Hub {
     }
     if (s.meta.status === "closed") throw new Error("Session closed");
 
+    const content: import("./types").ContentBlock[] = [];
+    const text = (input.text || "").trim();
+    if (text) content.push({ type: "text", text });
+
+    const bridgeImages: Array<{
+      mediaId: string;
+      url: string;
+      mimeType: string;
+      name?: string;
+    }> = [];
+
+    const imgs = (input.images || []).slice(0, 3);
+    for (const img of imgs) {
+      let mediaId = img.mediaId;
+      let mime = img.mimeType || "image/jpeg";
+      let name = img.name;
+      if (!mediaId && img.base64) {
+        const stored = saveMediaBase64({
+          base64: img.base64,
+          mimeType: mime,
+          name,
+        });
+        mediaId = stored.id;
+        mime = stored.mimeType;
+        name = stored.name;
+      }
+      if (!mediaId) continue;
+      const rel = mediaPublicPath(mediaId);
+      content.push({
+        type: "image",
+        mediaId,
+        mimeType: mime,
+        name,
+        url: rel,
+      });
+      const base = publicHubBase();
+      const abs = base ? `${base}${rel}` : rel;
+      bridgeImages.push({ mediaId, url: abs, mimeType: mime, name });
+    }
+
+    if (!content.length) throw new Error("Empty message");
+
     const userMsg: ChatMessage = {
       id: uid("msg"),
       role: "user",
-      content: [{ type: "text", text: input.text }],
+      content,
       createdAt: Date.now(),
       meta: { source: "phone" },
     };
@@ -460,8 +507,12 @@ class Hub {
     this.persistMsg(s.meta.id, userMsg);
     this.touch(s, { status: "thinking" });
 
+    const plainForDemo =
+      text ||
+      (bridgeImages.length ? `[${bridgeImages.length} image(s)]` : "");
+
     if (s.meta.demo) {
-      this.startDemo(s.meta.id, input.text);
+      this.startDemo(s.meta.id, plainForDemo);
       return;
     }
 
@@ -470,11 +521,23 @@ class Hub {
       throw new Error("Console offline");
     }
 
+    // Text the agent sees + note about local image paths (bridge downloads)
+    let agentText = text;
+    if (bridgeImages.length) {
+      const note = bridgeImages
+        .map((i, n) => `Image ${n + 1}: will be saved by sendell-remote (media ${i.mediaId})`)
+        .join("\n");
+      agentText = agentText
+        ? `${agentText}\n\n${note}`
+        : `User sent ${bridgeImages.length} image(s).\n${note}`;
+    }
+
     enqueueCommand(s.meta.id, {
       id: makeCommandId(),
       type: "prompt",
-      text: input.text,
+      text: agentText,
       createdAt: Date.now(),
+      images: bridgeImages.length ? bridgeImages : undefined,
     });
   }
 

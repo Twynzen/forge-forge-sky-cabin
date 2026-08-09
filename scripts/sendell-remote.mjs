@@ -153,7 +153,7 @@ async function cmdWait() {
         `/api/bridge/commands?token=${encodeURIComponent(token)}&timeout=${remain}`,
       );
       for (const c of commands || []) {
-        if (c.type === "prompt" && c.text) {
+        if (c.type === "prompt") {
           await api(hub, "/api/bridge/events", {
             method: "POST",
             body: JSON.stringify({
@@ -161,14 +161,54 @@ async function cmdWait() {
               events: [{ type: "status", status: "thinking" }],
             }),
           });
-          // Clean TUI: phone text looks like a normal user turn.
-          // JSON stays on stderr for machines; agents should use stdout text.
-          console.log(c.text);
+
+          // Download phone images into .sendell/inbox for the agent
+          const localPaths = [];
+          const imgs = c.images || [];
+          if (imgs.length) {
+            const inbox = join(sessionDir(cwd), "inbox");
+            mkdirSync(inbox, { recursive: true });
+            for (let i = 0; i < imgs.length; i++) {
+              const im = imgs[i];
+              try {
+                const url = im.url.startsWith("http")
+                  ? im.url
+                  : `${hub}${im.url.startsWith("/") ? "" : "/"}${im.url}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const buf = Buffer.from(await res.arrayBuffer());
+                const ext = (im.mimeType || "").includes("png")
+                  ? "png"
+                  : (im.mimeType || "").includes("webp")
+                    ? "webp"
+                    : "jpg";
+                const dest = join(
+                  inbox,
+                  `${im.mediaId || `img_${i}`}.${ext}`,
+                );
+                writeFileSync(dest, buf);
+                localPaths.push(dest);
+              } catch (e) {
+                log("image download failed", im.url, e.message || e);
+              }
+            }
+          }
+
+          let out = c.text || "";
+          if (localPaths.length) {
+            const block = localPaths
+              .map((p, n) => `Image ${n + 1} saved at: ${p}`)
+              .join("\n");
+            out = out ? `${out}\n\n${block}` : block;
+          }
+          // Clean TUI: phone text (+ local image paths) as normal user turn
+          console.log(out);
           console.error(
             JSON.stringify({
               type: "prompt",
               id: c.id,
               text: c.text,
+              images: localPaths,
               flag: "sendell-remote",
             }),
           );
@@ -335,8 +375,9 @@ async function cmdSay() {
     text = readFileSync(String(file), "utf8");
   }
   text = String(text || "").trim();
-  if (!text) {
-    console.error('Usage: say --text "..." | --file path  [--user "local human"]');
+  const imagePath = arg("image", "");
+  if (!text && !(imagePath && imagePath !== true)) {
+    console.error('Usage: say --text "..." | --file path [--image file] [--user "..."]');
     process.exit(1);
   }
 
@@ -368,8 +409,40 @@ async function cmdSay() {
     });
   }
 
+  // optional image from console → hub
+  let imageBlock = null;
+  if (imagePath && imagePath !== true) {
+    const abs = resolve(String(imagePath));
+    const buf = readFileSync(abs);
+    const b64 = buf.toString("base64");
+    const lower = abs.toLowerCase();
+    const mime = lower.endsWith(".png")
+      ? "image/png"
+      : lower.endsWith(".webp")
+        ? "image/webp"
+        : lower.endsWith(".gif")
+          ? "image/gif"
+          : "image/jpeg";
+    const up = await api(session.hub, "/api/hub/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        base64: b64,
+        mimeType: mime,
+        name: abs.split(/[/\\]/).pop(),
+      }),
+    });
+    imageBlock = {
+      type: "image",
+      mediaId: up.mediaId,
+      mimeType: up.mimeType,
+      name: up.name,
+      url: up.url,
+    };
+  }
+
   // push assistant (same bytes) to phone
   const msgId = uid("msg");
+
   const token = session.sessionToken;
   const hub = session.hub;
   await api(hub, "/api/bridge/events", {
@@ -383,15 +456,15 @@ async function cmdSay() {
           message: {
             id: msgId,
             role: "assistant",
-            content: [{ type: "text", text: "" }],
+            content: text ? [{ type: "text", text: "" }] : (imageBlock ? [imageBlock] : [{ type: "text", text: "" }]),
             createdAt: Date.now(),
-            streaming: true,
+            streaming: Boolean(text),
           },
         },
       ],
     }),
   });
-  const parts = text.match(/[\s\S]{1,64}/g) || [text];
+  const parts = text ? (text.match(/[\s\S]{1,64}/g) || [text]) : [];
   for (const part of parts) {
     await api(hub, "/api/bridge/events", {
       method: "POST",
@@ -413,7 +486,10 @@ async function cmdSay() {
           message: {
             id: msgId,
             role: "assistant",
-            content: [{ type: "text", text }],
+            content: [
+              ...(text ? [{ type: "text", text }] : []),
+              ...(imageBlock ? [imageBlock] : []),
+            ],
             createdAt: Date.now(),
             streaming: false,
           },
@@ -423,8 +499,9 @@ async function cmdSay() {
     }),
   });
 
-  // TUI: exact same body (agent must not invent a second version)
-  console.log(text);
+  // TUI: exact same body
+  if (text) console.log(text);
+  if (imageBlock) console.log("[image] " + imageBlock.url);
 }
 
 function cmdStatus() {
@@ -442,8 +519,8 @@ function help() {
   console.log(`sendell-remote: pair | wait | say | reply | note-user | status
   pair  --code X --hub URL [--cwd DIR]   → prints: rc
   wait  [--timeout 0]                    → phone text on stdout (plain)
-  say   --text "..." | --file f          → ONE answer: TUI stdout + phone (identical)
-        [--user "local human text"]
+  say   --text "..." | --file f [--image path]
+        [--user "local human text"]      → ONE answer (+ optional image)
   reply --text "..." [--user "..."]      → phone only (prefer say)
   note-user --text "..."                 → mirror local human to phone
 Env: SENDELL_HUB`);
