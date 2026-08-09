@@ -4,6 +4,7 @@ import {
   cancelSessionFn,
   closeSessionFn,
   renameSessionFn,
+  relinkSessionFn,
   createLinkRoomFn,
   getSessionFn,
   joinWithCodeFn,
@@ -296,6 +297,25 @@ export function AppShell() {
   };
 
 
+
+  const [relinking, setRelinking] = useState(false);
+  const handleRelink = async () => {
+    if (!activeSessionId) return;
+    setRelinking(true);
+    try {
+      const snap = (await relinkSessionFn({
+        data: { sessionId: activeSessionId },
+      })) as SessionSnapshot;
+      setSnapshot(snap);
+      await refreshSessions();
+      toast.success(`Reconnect code: ${snap.pairingCode || "ready"}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Relink failed");
+    } finally {
+      setRelinking(false);
+    }
+  };
+
   const handleRename = async (id: string, title: string) => {
     try {
       const snap = (await renameSessionFn({
@@ -365,6 +385,8 @@ export function AppShell() {
             sending={sending}
             onMenu={() => setSidebarOpen(true)}
             onLink={() => setLinkOpen(true)}
+            onRelink={() => void handleRelink()}
+            relinking={relinking}
             onSend={(t, imgs) => void handleSend(t, imgs)}
             onCancel={() => void handleCancel()}
             onAllow={(tool) => void handlePermission(tool, "allow")}

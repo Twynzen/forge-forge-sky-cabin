@@ -157,6 +157,7 @@ export function Composer({
           disabled={disabled || sending || packing || images.length >= MAX_IMAGES}
           onClick={() => fileRef.current?.click()}
           aria-label="Attach image"
+          title="Attach image (up to 3)"
         >
           {packing ? (
             <Loader2 className="size-4 animate-spin" />

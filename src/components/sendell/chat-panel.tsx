@@ -1,4 +1,4 @@
-import { Link2, Menu, Radio } from "lucide-react";
+import { Link2, Menu, Radio, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PromptImageInput, SessionSnapshot, ToolCall } from "@/lib/hub/types";
 import { cn } from "@/lib/utils/cn";
@@ -16,21 +16,26 @@ import {
 export function ChatPanel({
   snapshot,
   sending,
+  relinking,
   onMenu,
   onSend,
   onCancel,
   onAllow,
   onReject,
   onLink,
+  onRelink,
 }: {
   snapshot: SessionSnapshot | null;
   sending?: boolean;
+  relinking?: boolean;
   onMenu?: () => void;
   onSend: (text: string, images?: PromptImageInput[]) => void;
   onCancel?: () => void;
   onAllow: (tool: ToolCall) => void;
   onReject: (tool: ToolCall) => void;
   onLink?: () => void;
+  /** Generate new code for THIS session (keeps history) */
+  onRelink?: () => void;
 }) {
   if (!snapshot) {
     return (
@@ -67,6 +72,9 @@ export function ChatPanel({
   const pending = snapshot.pendingPermissions[0];
   const waiting = snapshot.linkState === "waiting";
   const linked = snapshot.linkState === "linked";
+  const offline =
+    snapshot.linkState === "disconnected" ||
+    snapshot.status === "disconnected";
   const busy =
     sending ||
     snapshot.status === "thinking" ||
@@ -110,14 +118,19 @@ export function ChatPanel({
                 /rc
               </span>
             )}
+            {offline && (
+              <span className="shrink-0 rounded-md border border-warning/40 bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                offline
+              </span>
+            )}
             <WorkingChip active={working} status={snapshot.status} sending={sending} />
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-4">
             <ProviderBadge providerId={snapshot.providerId} demo={snapshot.demo} />
-            {linked && projectName && (
+            {projectName && (
               <span className="truncate text-[11px] text-fg-subtle">{projectName}</span>
             )}
-            {!linked && (
+            {!linked && !offline && (
               <span className="text-[11px] text-fg-subtle">{statusLabel(snapshot.status)}</span>
             )}
           </div>
@@ -127,15 +140,44 @@ export function ChatPanel({
 
       {waiting && (
         <div className="border-b border-warning/30 bg-warning/10 px-4 py-3 text-center">
-          <p className="text-xs font-medium text-warning">Pairing code</p>
+          <p className="text-xs font-medium text-warning">
+            {snapshot.messages.length > 0 ? "Reconnect this session" : "Pairing code"}
+          </p>
           {snapshot.pairingCode && (
             <p className="mt-1 font-mono text-2xl font-semibold tracking-[0.2em] text-fg">
               {snapshot.pairingCode}
             </p>
           )}
           <p className="mt-1.5 text-[11px] text-fg-muted">
-            Type <code className="text-primary">rc CODIGO</code> in the agent
+            In Grok type{" "}
+            <code className="text-primary">
+              /remote-sendell {snapshot.pairingCode || "CODIGO"}
+            </code>
           </p>
+          <p className="mt-1 text-[10px] text-fg-subtle">
+            Same chat history is kept. Resume Grok first, then run the command.
+          </p>
+        </div>
+      )}
+
+      {offline && !waiting && (
+        <div className="border-b border-warning/30 bg-warning/10 px-4 py-3">
+          <p className="text-xs font-medium text-warning">Console offline</p>
+          <p className="mt-1 text-[11px] text-fg-muted leading-relaxed">
+            Grok stopped, crashed, or the cable dropped. Chat history is saved.
+            Resume Grok on the PC, then reconnect to this same session.
+          </p>
+          {onRelink && (
+            <Button
+              size="sm"
+              className="mt-2.5"
+              disabled={relinking}
+              onClick={onRelink}
+            >
+              <RefreshCw className={cn("size-3.5", relinking && "animate-spin")} />
+              {relinking ? "Preparing…" : "Reconnect (new code)"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -150,7 +192,6 @@ export function ChatPanel({
         </div>
       )}
 
-      {/* Single scroll owner lives inside MessageList */}
       <div className="min-h-0 flex-1">
         <MessageList
           messages={snapshot.messages}
@@ -163,16 +204,23 @@ export function ChatPanel({
       </div>
 
       <Composer
-        disabled={waiting || snapshot.status === "closed"}
+        disabled={
+          waiting ||
+          offline ||
+          snapshot.status === "closed" ||
+          snapshot.status === "disconnected"
+        }
         sending={busy && !pending}
         onSend={onSend}
         onCancel={onCancel}
         placeholder={
           waiting
-            ? "Waiting for console…"
-            : pending
-              ? "Approve or reject above…"
-              : "Message…"
+            ? "Waiting for console to pair…"
+            : offline
+              ? "Console offline — reconnect first"
+              : pending
+                ? "Approve or reject above…"
+                : "Message or attach image…"
         }
       />
     </div>

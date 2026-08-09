@@ -145,6 +145,11 @@ export const Route = createFileRoute("/api/hub/$")({
             if (!title?.trim()) return err("title required");
             return json(h.renameSession(sessionId, title));
           }
+          if (path === "relink") {
+            const sessionId = (body as { sessionId?: string }).sessionId;
+            if (!sessionId) return err("sessionId required");
+            return json(h.relinkSession(sessionId));
+          }
           return err("not found", 404);
         } catch (e) {
           return err(e, 400);

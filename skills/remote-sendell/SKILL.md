@@ -72,3 +72,18 @@ No API keys. No double answers.
 
 - Phone to you: `wait` downloads into `.sendell/inbox/` and prints local paths.
 - You to phone: `node $sh say --cwd (Get-Location) --text "..." --image path\to.png`
+
+## Reconnect after crash / resume
+
+If the phone shows **offline**, user taps **Reconnect** and gets a new code for the **same** session (history kept).
+You: `/remote-sendell NEWCODE` then `wait` again. Do not open a parallel empty session.
+
+## Screenshots / images (required)
+
+When you capture a screenshot or the user asks to see an image:
+1. Save the file on disk.
+2. Push to the phone with **say --image** (path-only text does NOT show a picture):
+
+```powershell
+node $sh say --cwd (Get-Location) --text "Screenshot" --image path\to\file.png
+```

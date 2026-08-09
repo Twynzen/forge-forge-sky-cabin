@@ -99,3 +99,9 @@ export async function renameSessionFn(opts: {
 }): Promise<SessionSnapshot> {
   return api("/api/hub/rename", { method: "POST", json: opts.data });
 }
+
+export async function relinkSessionFn(opts: {
+  data: { sessionId: string };
+}): Promise<SessionSnapshot> {
+  return api("/api/hub/relink", { method: "POST", json: opts.data });
+}

@@ -409,10 +409,15 @@ class Hub {
 
     const host = input.hostname || "console";
     const cwd = input.cwd || "";
-    const title =
+    const folderName =
       cwd.split(/[/\\]/).filter(Boolean).pop() ||
       input.agentName ||
       "Linked console";
+    const keepTitle =
+      Boolean(s.meta.title) &&
+      s.meta.title !== "New remote" &&
+      s.meta.title !== "Demo";
+    const title = keepTitle ? s.meta.title : folderName;
 
     this.touch(s, {
       title,
@@ -423,6 +428,7 @@ class Hub {
       status: "ready",
       linkState: "linked",
       demo: input.demo === true,
+      lastError: undefined,
     });
     s.offlineSince = undefined;
 
@@ -567,6 +573,54 @@ class Hub {
       createdAt: Date.now(),
     });
     this.touch(s, { status: s.meta.linkState === "linked" ? "ready" : s.meta.status });
+  }
+
+
+  /**
+   * Offline → waiting with a NEW pairing code, same session id + history.
+   * Use after Grok crash/resume so phone reattaches without losing chat.
+   */
+  relinkSession(sessionId: string): SessionSnapshot {
+    const s = this.sessions.get(sessionId);
+    if (!s) throw new Error("Session not found");
+    if (s.meta.demo) throw new Error("Demo sessions cannot relink");
+
+    // Drop old bridge token
+    unregisterBridge(sessionId);
+    if (s.pairingNormalized) this.codeIndex.delete(s.pairingNormalized);
+    s.sessionToken = undefined;
+    s.offlineSince = undefined;
+    s.demoAbort?.abort();
+
+    const code = generatePairingCode(6);
+    const normalized = normalizePairingCode(code);
+    s.pairingNormalized = normalized;
+    this.codeIndex.set(normalized, sessionId);
+
+    this.touch(s, {
+      pairingCode: formatPairingCode(code),
+      linkState: "waiting",
+      status: "waiting_link",
+      lastError: undefined,
+    });
+
+    // System note in chat (persisted)
+    const note: ChatMessage = {
+      id: uid("msg"),
+      role: "system",
+      content: [
+        {
+          type: "text",
+          text: `Reconnect: in Grok type  /remote-sendell ${formatPairingCode(code)}`,
+        },
+      ],
+      createdAt: Date.now(),
+    };
+    s.messages.push(note);
+    this.emit({ type: "message.appended", sessionId, message: note });
+    // system messages skipped by persistMsg — OK
+
+    return this.getSnapshot(sessionId)!;
   }
 
   renameSession(sessionId: string, title: string): SessionSnapshot {
