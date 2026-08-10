@@ -125,7 +125,6 @@ export function AppShell() {
         if (activeSessionId) {
           const still = list.some((s) => s.id === activeSessionId);
           if (!still) {
-            // Only jump away if session was truly removed (user delete / empty room expire)
             setActiveSessionId(list[0]?.id ?? null);
             if (list[0]) await refreshSnapshot(list[0].id);
           } else {
@@ -171,7 +170,6 @@ export function AppShell() {
   }): Promise<SessionSnapshot | null> => {
     setCreating(true);
     try {
-      // Always a brand-new room + code (never reuse another session's code)
       const snap = (await createLinkRoomFn({
         data: {
           providerId: input.providerId,
@@ -194,10 +192,8 @@ export function AppShell() {
 
   const handleAbandonRoom = async (sessionId: string) => {
     try {
-      // Only abandon empty waiting rooms created by the dialog
       const snap = snapshots[sessionId];
       if (snap && snap.messages.length > 0) {
-        // Has history (e.g. user opened link by mistake) — do not delete
         if (pendingRoomId === sessionId) setPendingRoomId(null);
         return;
       }
@@ -263,7 +259,6 @@ export function AppShell() {
       await refreshSnapshot(sid);
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => setTimeout(r, POLL_MS));
-        // Only clear loading for this session; user may have switched tabs
         const snap = await refreshSnapshot(sid);
         if (
           !snap ||
@@ -279,11 +274,9 @@ export function AppShell() {
       toast.error(err instanceof Error ? err.message : "Send failed");
       await refreshSnapshot(sid);
     } finally {
-      // Clear only if we still own the sending flag for this session
-      setSendingSessionId((prev) => (prev === sid ? null : prev) as unknown as null);
-      // zustand setter doesn't support functional form by default — set explicitly
-      const current = useAppStore.getState().sendingSessionId;
-      if (current === sid) setSendingSessionId(null);
+      if (useAppStore.getState().sendingSessionId === sid) {
+        setSendingSessionId(null);
+      }
       await refreshSessions();
     }
   };
