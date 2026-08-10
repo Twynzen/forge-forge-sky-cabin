@@ -5,7 +5,7 @@
  *   waiting  → linked (pair + heartbeat)
  *   linked   → offline (no heartbeat ~45s, e.g. Ctrl+C Grok)
  *   offline  → linked (wait/heartbeat resumes same token)
- *   offline  → removed (user deletes, or auto after ~5 min offline)
+ *   offline  → stays until user removes (history in Postgres)
  *
  * Durability: titles + transcripts in Postgres/PGLite (sendell_* tables).
  * Live bridge tokens/queues stay in memory — after hub restart, re-pair.
@@ -53,8 +53,9 @@ import {
 } from "./media-store";
 
 const STALE_MS = 45_000;
-const AUTO_REMOVE_MS = 5 * 60_000;
 const SWEEP_MS = 8_000;
+/** Empty unpaired rooms only (no messages) expire after this */
+const EMPTY_WAITING_MS = 30 * 60_000;
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -134,7 +135,6 @@ class Hub {
     });
   }
 
-  /** Wait until DB sessions are loaded (call from API handlers). */
   async ready(): Promise<void> {
     await this.hydratePromise;
   }
@@ -213,6 +213,8 @@ class Hub {
 
   private applyLiveness(s: InternalSession): void {
     if (s.meta.demo) return;
+    // Waiting for pair: no bridge expected — do not mark offline/delete
+    if (s.meta.linkState === "waiting") return;
     if (!s.sessionToken) return;
 
     const live = this.isBridgeLive(s.meta.id);
@@ -229,7 +231,8 @@ class Hub {
       s.meta.linkState === "linked" ||
       s.meta.status === "ready" ||
       s.meta.status === "thinking" ||
-      s.meta.status === "streaming"
+      s.meta.status === "streaming" ||
+      s.meta.status === "awaiting_permission"
     ) {
       if (!s.offlineSince) s.offlineSince = Date.now();
       this.touch(s, { linkState: "disconnected", status: "disconnected" });
@@ -242,14 +245,13 @@ class Hub {
     const toRemove: string[] = [];
     for (const s of this.sessions.values()) {
       this.applyLiveness(s);
-      // NEVER auto-delete linked/disconnected sessions — they live in Postgres
-      // until the user taps "Remove from app". (Old 5-min purge wiped history.)
+      // Only purge brand-new empty rooms that nobody paired
+      // NEVER delete sessions with history (reconnect / offline)
       if (
         s.meta.linkState === "waiting" &&
         s.messages.length === 0 &&
-        Date.now() - s.meta.createdAt > 15 * 60_000
+        Date.now() - s.meta.createdAt > EMPTY_WAITING_MS
       ) {
-        // Only empty unpaired rooms expire
         toRemove.push(s.meta.id);
       }
     }
@@ -262,10 +264,14 @@ class Hub {
     return PROVIDERS.map((p) => ({ ...p }));
   }
 
+  /**
+   * All non-closed sessions, including waiting (reconnect codes) and offline.
+   * Hiding "waiting" caused the UI to jump to another session mid-reconnect.
+   */
   listSessions(): SessionMeta[] {
     this.sweepLiveness();
     return Array.from(this.sessions.values())
-      .filter((s) => s.meta.linkState !== "waiting")
+      .filter((s) => s.meta.status !== "closed")
       .map((s) => ({ ...s.meta }))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -403,6 +409,7 @@ class Hub {
     const s = this.sessions.get(sessionId);
     if (!s) throw new Error("Room not found");
 
+    // If this code was already bound to another live session, still re-pair this room
     const token = uid("tok");
     s.sessionToken = token;
     registerBridge(sessionId, token);
@@ -522,7 +529,6 @@ class Hub {
       throw new Error("Console offline");
     }
 
-    // Text the agent sees + note about local image paths (bridge downloads)
     let agentText = text;
     if (bridgeImages.length) {
       const note = bridgeImages
@@ -575,17 +581,14 @@ class Hub {
     this.touch(s, { status: s.meta.linkState === "linked" ? "ready" : s.meta.status });
   }
 
-
   /**
    * Offline → waiting with a NEW pairing code, same session id + history.
-   * Use after Grok crash/resume so phone reattaches without losing chat.
    */
   relinkSession(sessionId: string): SessionSnapshot {
     const s = this.sessions.get(sessionId);
     if (!s) throw new Error("Session not found");
     if (s.meta.demo) throw new Error("Demo sessions cannot relink");
 
-    // Drop old bridge token
     unregisterBridge(sessionId);
     if (s.pairingNormalized) this.codeIndex.delete(s.pairingNormalized);
     s.sessionToken = undefined;
@@ -604,7 +607,6 @@ class Hub {
       lastError: undefined,
     });
 
-    // System note in chat (persisted)
     const note: ChatMessage = {
       id: uid("msg"),
       role: "system",
@@ -618,7 +620,6 @@ class Hub {
     };
     s.messages.push(note);
     this.emit({ type: "message.appended", sessionId, message: note });
-    // system messages skipped by persistMsg — OK
 
     return this.getSnapshot(sessionId)!;
   }
@@ -770,7 +771,6 @@ export function getHub(): Hub {
   return g.__sendellHub;
 }
 
-/** Prefer in API handlers so list/snapshot see hydrated DB rows. */
 export async function getHubReady(): Promise<Hub> {
   const h = getHub();
   await h.ready();
