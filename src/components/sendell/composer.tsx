@@ -5,12 +5,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils/cn";
 import type { PromptImageInput } from "@/lib/hub/types";
 
-const SUGGESTIONS = [
-  "Explain what this linked console is doing",
-  "Implement a small change and ask for approval",
-  "Summarize the project structure",
-];
-
 const MAX_IMAGES = 3;
 const MAX_DIM = 1600;
 const JPEG_QUALITY = 0.82;
@@ -74,7 +68,11 @@ export function Composer({
         if (!file.type.startsWith("image/")) continue;
         const img = await fileToPromptImage(file);
         next.push(img);
-        nextPrev.push(img.base64!.startsWith("data:") ? img.base64! : `data:image/jpeg;base64,${img.base64}`);
+        nextPrev.push(
+          img.base64!.startsWith("data:")
+            ? img.base64!
+            : `data:image/jpeg;base64,${img.base64}`,
+        );
       }
       setImages(next);
       setPreviews(nextPrev);
@@ -95,25 +93,11 @@ export function Composer({
     setPreviews([]);
   };
 
-  const canSend = (text.trim() || images.length > 0) && !disabled && !sending && !packing;
+  const canSend =
+    (text.trim() || images.length > 0) && !disabled && !sending && !packing;
 
   return (
     <div className="safe-pb border-t border-border bg-bg/90 backdrop-blur-md">
-      {!text && !sending && !disabled && !images.length && (
-        <div className="flex gap-2 overflow-x-auto px-3 pt-2.5 scrollbar-none sm:px-4">
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setText(s)}
-              className="shrink-0 rounded-full border border-border bg-bg-subtle px-3 py-1.5 text-xs text-fg-muted transition hover:border-border-strong hover:text-fg"
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
       {previews.length > 0 && (
         <div className="flex gap-2 overflow-x-auto px-3 pt-2.5 sm:px-4">
           {previews.map((src, i) => (
@@ -154,7 +138,9 @@ export function Composer({
           size="icon"
           variant="ghost"
           className="shrink-0"
-          disabled={disabled || sending || packing || images.length >= MAX_IMAGES}
+          disabled={
+            disabled || sending || packing || images.length >= MAX_IMAGES
+          }
           onClick={() => fileRef.current?.click()}
           aria-label="Attach image"
           title="Attach image (up to 3)"
