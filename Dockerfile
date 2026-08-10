@@ -28,11 +28,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8080
+ENV SENDELL_MEDIA_DIR=/data/media
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \
   && rm -rf /var/lib/apt/lists/* \
-  && useradd -r -u 1001 sendell
+  && useradd -r -u 1001 sendell \
+  && mkdir -p /data/media \
+  && chown -R sendell:sendell /data
 
 COPY --from=build /app/.output ./.output
 COPY --from=build /app/package.json ./package.json
@@ -43,9 +46,9 @@ COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/node_modules ./node_modules
 COPY docker/entrypoint.sh /entrypoint.sh
 
+# entrypoint runs as root briefly to fix volume ownership, then drops to sendell
 RUN chmod +x /entrypoint.sh && chown -R sendell:sendell /app
 
-USER sendell
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
