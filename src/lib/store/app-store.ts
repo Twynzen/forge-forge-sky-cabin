@@ -38,7 +38,8 @@ interface AppState {
   activeSessionId: string | null;
   snapshots: Record<string, SessionSnapshot>;
   sidebarOpen: boolean;
-  sending: boolean;
+  /** Which session is currently sending — null when idle (per-session, not global) */
+  sendingSessionId: string | null;
   bootstrapped: boolean;
 
   setProviders: (p: ProviderInfo[]) => void;
@@ -52,7 +53,7 @@ interface AppState {
   setPlan: (sessionId: string, steps: PlanStep[]) => void;
   setPendingPermission: (sessionId: string, tool: ToolCall | null) => void;
   setSidebarOpen: (open: boolean) => void;
-  setSending: (v: boolean) => void;
+  setSendingSessionId: (id: string | null) => void;
   setBootstrapped: (v: boolean) => void;
   removeSession: (id: string) => void;
 }
@@ -63,7 +64,7 @@ export const useAppStore = create<AppState>((set) => ({
   activeSessionId: null,
   snapshots: {},
   sidebarOpen: false,
-  sending: false,
+  sendingSessionId: null,
   bootstrapped: false,
 
   setProviders: (providers) => set({ providers }),
@@ -172,7 +173,7 @@ export const useAppStore = create<AppState>((set) => ({
       };
     }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
-  setSending: (sending) => set({ sending }),
+  setSendingSessionId: (sendingSessionId) => set({ sendingSessionId }),
   setBootstrapped: (bootstrapped) => set({ bootstrapped }),
   removeSession: (id) =>
     set((state) => {
@@ -182,6 +183,8 @@ export const useAppStore = create<AppState>((set) => ({
         state.activeSessionId === id
           ? (sessions[0]?.id ?? null)
           : state.activeSessionId;
-      return { snapshots: rest, sessions, activeSessionId };
+      const sendingSessionId =
+        state.sendingSessionId === id ? null : state.sendingSessionId;
+      return { snapshots: rest, sessions, activeSessionId, sendingSessionId };
     }),
 }));
