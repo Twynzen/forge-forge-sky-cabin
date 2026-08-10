@@ -39,14 +39,14 @@ export function AppShell() {
     activeSessionId,
     snapshots,
     sidebarOpen,
-    sending,
+    sendingSessionId,
     bootstrapped,
     setProviders,
     setSessions,
     setActiveSessionId,
     setSnapshot,
     setSidebarOpen,
-    setSending,
+    setSendingSessionId,
     setBootstrapped,
     removeSession,
   } = useAppStore();
@@ -55,15 +55,9 @@ export function AppShell() {
   const [creating, setCreating] = useState(false);
   const [pendingRoomId, setPendingRoomId] = useState<string | null>(null);
 
-  /** Show linked + offline consoles (not unpaired waiting rooms) */
+  /** All non-closed sessions including waiting (reconnect) and offline */
   const visibleSessions = useMemo(
-    () =>
-      sessions.filter(
-        (s) =>
-          s.linkState === "linked" ||
-          s.linkState === "disconnected" ||
-          s.status === "disconnected",
-      ),
+    () => sessions.filter((s) => s.status !== "closed"),
     [sessions],
   );
 
@@ -131,6 +125,7 @@ export function AppShell() {
         if (activeSessionId) {
           const still = list.some((s) => s.id === activeSessionId);
           if (!still) {
+            // Only jump away if session was truly removed (user delete / empty room expire)
             setActiveSessionId(list[0]?.id ?? null);
             if (list[0]) await refreshSnapshot(list[0].id);
           } else {
@@ -176,6 +171,7 @@ export function AppShell() {
   }): Promise<SessionSnapshot | null> => {
     setCreating(true);
     try {
+      // Always a brand-new room + code (never reuse another session's code)
       const snap = (await createLinkRoomFn({
         data: {
           providerId: input.providerId,
@@ -184,6 +180,8 @@ export function AppShell() {
         },
       })) as SessionSnapshot;
       setPendingRoomId(snap.id);
+      setActiveSessionId(snap.id);
+      setSnapshot(snap);
       await refreshSessions();
       return snap;
     } catch (err) {
@@ -196,6 +194,13 @@ export function AppShell() {
 
   const handleAbandonRoom = async (sessionId: string) => {
     try {
+      // Only abandon empty waiting rooms created by the dialog
+      const snap = snapshots[sessionId];
+      if (snap && snap.messages.length > 0) {
+        // Has history (e.g. user opened link by mistake) — do not delete
+        if (pendingRoomId === sessionId) setPendingRoomId(null);
+        return;
+      }
       await closeSessionFn({ data: { sessionId } });
     } catch {
       /* ignore */
@@ -212,6 +217,8 @@ export function AppShell() {
         data: { code },
       })) as SessionSnapshot;
       setPendingRoomId(snap.id);
+      setActiveSessionId(snap.id);
+      setSnapshot(snap);
       await refreshSessions();
       return snap;
     } catch (err) {
@@ -247,15 +254,17 @@ export function AppShell() {
   const handleSend = async (text: string, images?: PromptImageInput[]) => {
     if (!activeSessionId) return;
     if (!text.trim() && !(images && images.length)) return;
-    setSending(true);
+    const sid = activeSessionId;
+    setSendingSessionId(sid);
     try {
       await startPromptFn({
-        data: { sessionId: activeSessionId, text, images },
+        data: { sessionId: sid, text, images },
       });
-      await refreshSnapshot(activeSessionId);
+      await refreshSnapshot(sid);
       for (let i = 0; i < 120; i++) {
         await new Promise((r) => setTimeout(r, POLL_MS));
-        const snap = await refreshSnapshot(activeSessionId);
+        // Only clear loading for this session; user may have switched tabs
+        const snap = await refreshSnapshot(sid);
         if (
           !snap ||
           snap.status === "ready" ||
@@ -266,18 +275,23 @@ export function AppShell() {
           break;
         }
       }
-      setSending(false);
-      await refreshSessions();
     } catch (err) {
-      setSending(false);
       toast.error(err instanceof Error ? err.message : "Send failed");
-      await refreshSnapshot(activeSessionId);
+      await refreshSnapshot(sid);
+    } finally {
+      // Clear only if we still own the sending flag for this session
+      setSendingSessionId((prev) => (prev === sid ? null : prev) as unknown as null);
+      // zustand setter doesn't support functional form by default — set explicitly
+      const current = useAppStore.getState().sendingSessionId;
+      if (current === sid) setSendingSessionId(null);
+      await refreshSessions();
     }
   };
 
   const handleCancel = async () => {
     if (!activeSessionId) return;
     await cancelSessionFn({ data: { sessionId: activeSessionId } });
+    setSendingSessionId(null);
     await refreshSnapshot(activeSessionId);
   };
 
@@ -296,8 +310,6 @@ export function AppShell() {
     await refreshSnapshot(activeSessionId);
   };
 
-
-
   const [relinking, setRelinking] = useState(false);
   const handleRelink = async () => {
     if (!activeSessionId) return;
@@ -307,6 +319,7 @@ export function AppShell() {
         data: { sessionId: activeSessionId },
       })) as SessionSnapshot;
       setSnapshot(snap);
+      setActiveSessionId(snap.id);
       await refreshSessions();
       toast.success(`Reconnect code: ${snap.pairingCode || "ready"}`);
     } catch (err) {
@@ -335,10 +348,15 @@ export function AppShell() {
     if (activeSessionId === id) {
       setActiveSessionId(null);
     }
+    if (sendingSessionId === id) {
+      setSendingSessionId(null);
+    }
     await refreshSessions();
   };
 
   const activeSnap = activeSessionId ? snapshots[activeSessionId] ?? null : null;
+  const activeSending =
+    Boolean(activeSessionId) && sendingSessionId === activeSessionId;
 
   return (
     <div className="flex h-dvh overflow-hidden bg-bg">
@@ -382,7 +400,7 @@ export function AppShell() {
         ) : (
           <ChatPanel
             snapshot={activeSnap}
-            sending={sending}
+            sending={activeSending}
             onMenu={() => setSidebarOpen(true)}
             onLink={() => setLinkOpen(true)}
             onRelink={() => void handleRelink()}
